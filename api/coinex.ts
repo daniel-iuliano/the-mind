@@ -1,4 +1,6 @@
-import { COINEX_BASE_URL } from "../constants";
+import https from "node:https";
+
+const COINEX_BASE_URL = "https://api.coinex.com/v1";
 
 const setCorsHeaders = (res: any) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -38,15 +40,46 @@ export default async function handler(req: any, res: any) {
   });
 
   try {
-    const response = await fetch(targetUrl.toString(), {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    const body = await response.text();
-    res.status(response.status).send(body);
+    const { statusCode, body, contentType } = await fetchCoinex(targetUrl);
+    if (contentType) {
+      res.setHeader("Content-Type", contentType);
+    }
+    res.status(statusCode).send(body);
   } catch (error) {
+    console.error("CoinEx proxy error:", error);
     res.status(502).json({ error: "Failed to reach CoinEx API." });
   }
 }
+
+const fetchCoinex = (url: URL) =>
+  new Promise<{ statusCode: number; body: string; contentType?: string }>((resolve, reject) => {
+    const request = https.request(
+      url,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "QuantMind-Vercel-Proxy",
+        },
+      },
+      response => {
+        const chunks: Buffer[] = [];
+
+        response.on("data", chunk => {
+          chunks.push(chunk);
+        });
+
+        response.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf-8");
+          resolve({
+            statusCode: response.statusCode ?? 502,
+            body,
+            contentType: response.headers["content-type"],
+          });
+        });
+      }
+    );
+
+    request.on("error", reject);
+    request.end();
+  });
