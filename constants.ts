@@ -1,6 +1,6 @@
 import { Timeframe } from "./types";
 
-export const APP_NAME = "QuantMind";
+export const APP_NAME = "The Mind";
 export const COINEX_BASE_URL = "https://api.coinex.com/v1";
 
 // Pairs to scan (simulating a watchlist to avoid API rate limits)

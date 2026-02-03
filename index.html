@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>QuantMind | Trading Intel</title>
+    <title>The Mind | Trading Intel</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -16,13 +16,13 @@
             },
             colors: {
               street: {
-                dark: '#121212', // Deep Black
+                dark: '#283137', // Dark Cyan-based Palette (Requested)
                 light: '#f4f4f5', // Zinc 100
-                cardDark: '#1e1e1e',
+                cardDark: '#2A4250', // Slightly darker/desaturated for cards
                 cardLight: '#ffffff',
-                acid: '#ccff00', // Neon Green
+                acid: '#fff35b', // Neon Green
                 pink: '#ff0099', // Hot Pink
-                purple: '#8a2be2', // Electric Purple
+                purple: '#ad54ff', // Electric Purple
                 cyan: '#00ffff',
               }
             },
@@ -30,7 +30,27 @@
               'brutal': '4px 4px 0px 0px rgba(0,0,0,1)',
               'brutal-sm': '2px 2px 0px 0px rgba(0,0,0,1)',
               'brutal-white': '4px 4px 0px 0px rgba(255,255,255,1)',
-              'glow': '0 0 10px rgba(204, 255, 0, 0.5)',
+              'glow': '0 0 15px rgba(204, 255, 0, 0.4)',
+            },
+            animation: {
+              'heartbeat': 'heartbeat 2s ease-in-out infinite',
+              'lightning': 'lightning 2s linear infinite',
+              'float': 'float 3s ease-in-out infinite',
+            },
+            keyframes: {
+              heartbeat: {
+                '0%, 100%': { transform: 'scale(1)', opacity: '1' },
+                '50%': { transform: 'scale(1.05)', opacity: '0.9' },
+              },
+              lightning: {
+                '0%, 100%': { opacity: '0.2' },
+                '10%, 90%': { opacity: '0.4' },
+                '50%': { opacity: '1' },
+              },
+              float: {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(-5px)' },
+              }
             }
           }
         }

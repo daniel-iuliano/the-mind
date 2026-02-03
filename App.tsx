@@ -4,7 +4,7 @@ import { analyzeCandles, calculateSupportResistance } from './services/indicator
 import { scoreMarket } from './services/analyzer';
 import { generateAIAnalysis } from './services/geminiService';
 import { generatePrediction } from './services/predictor';
-import { testTelegramConnection, sendTelegramMessage, formatAlertMessage, shouldSendAlert } from './services/telegram';
+import { sendTelegramMessage, formatAlertMessage, shouldSendAlert } from './services/telegram';
 import { WATCHLIST, DEFAULT_TIMEFRAME } from './constants';
 import { MarketAnalysis, OHLCV, Timeframe, SupportResistanceLevel, AlertConfig, PredictionResult } from './types';
 import Chart from './components/Chart';
@@ -16,11 +16,63 @@ const BellIcon = () => <svg className="w-5 h-5" fill="none" stroke="currentColor
 const PredictIcon = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>;
 const CloseIcon = () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>;
 
-// --- Helper Components ---
+// --- BRAIN LOADER COMPONENT (THE MIND IDENTITY) ---
+interface BrainLoaderProps {
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+  className?: string;
+  label?: string;
+}
 
-const LoadingSpinner = () => (
-  <div className="w-5 h-5 border-4 border-street-acid border-t-transparent rounded-full animate-spin"></div>
-);
+const BrainLoader: React.FC<BrainLoaderProps> = ({ size = 'md', className = '', label }) => {
+  const dims = {
+    sm: "w-6 h-6",
+    md: "w-10 h-10",
+    lg: "w-24 h-24",
+    xl: "w-40 h-40"
+  };
+
+  return (
+    <div className={`flex flex-col items-center justify-center ${className} select-none pointer-events-none`}>
+        <div className={`relative ${dims[size]}`}>
+            {/* Pulsating Brain */}
+            <svg 
+                viewBox="0 0 100 100" 
+                className="w-full h-full text-street-acid dark:text-street-acid text-street-purple animate-heartbeat drop-shadow-glow"
+                fill="currentColor"
+            >
+                {/* Brain Shape */}
+                <path d="M20,50 C20,25 35,10 50,10 C65,10 80,25 80,50 C80,60 75,70 65,75 L60,85 C60,85 40,85 40,85 L35,75 C25,70 20,60 20,50 Z" opacity="0.9"/>
+                {/* Circuit/Lobe Details */}
+                <path d="M50,15 L50,85 M35,25 C35,25 65,25 65,25 M30,50 L70,50 M40,65 L60,65" stroke="rgba(0,0,0,0.2)" strokeWidth="3" fill="none" strokeLinecap="round"/>
+            </svg>
+            
+            {/* Electric Rays (Sparks) */}
+            <svg className="absolute inset-0 w-full h-full animate-lightning pointer-events-none text-white mix-blend-overlay" viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="2">
+                 <path d="M10,40 L20,45" opacity="0.8" />
+                 <path d="M90,40 L80,45" opacity="0.8" />
+                 <path d="M50,5 L50,15" opacity="0.8" />
+                 <path d="M15,15 L25,25" opacity="0.8" />
+                 <path d="M85,15 L75,25" opacity="0.8" />
+                 <path d="M30,80 L35,90" opacity="0.5" />
+                 <path d="M70,80 L65,90" opacity="0.5" />
+            </svg>
+        </div>
+        {label && <span className="mt-4 text-[10px] font-black uppercase tracking-[0.2em] animate-pulse opacity-80 text-street-dark dark:text-street-light">{label}</span>}
+    </div>
+  );
+};
+
+// --- GLOBAL FULLSCREEN LOADER ---
+const GlobalInteractionLoader = ({ visible }: { visible: boolean }) => {
+  if (!visible) return null;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-street-light/80 dark:bg-street-dark/95 backdrop-blur-sm animate-in fade-in duration-200">
+        <BrainLoader size="xl" label="THINKING" />
+    </div>
+  );
+};
+
+// --- Helper Components ---
 
 const PriceDisplay = ({ price }: { price: number }) => {
   const [prevPrice, setPrevPrice] = useState(price);
@@ -44,7 +96,6 @@ const PriceDisplay = ({ price }: { price: number }) => {
   );
 };
 
-// "Street" style badge
 const StreetBadge = ({ text, type }: { text: string, type: 'bull' | 'bear' | 'neutral' }) => {
   const colors = {
     bull: 'bg-street-acid text-black border-black',
@@ -71,7 +122,7 @@ const MarketCard = ({ data, onClick, isLoading }: { data: MarketAnalysis, onClic
         <div>
           <div className="flex items-center gap-2 mb-1">
             <h3 className="text-lg font-extrabold italic tracking-tight">{data.symbol}</h3>
-            {isLoading && <LoadingSpinner />}
+            {isLoading && <BrainLoader size="sm" />}
           </div>
           <div className="flex items-center gap-3 text-xs font-bold text-gray-600 dark:text-gray-400">
              <PriceDisplay price={data.price} />
@@ -128,7 +179,6 @@ const ModalWrapper = ({ isOpen, onClose, title, children, color = "border-black 
     );
 };
 
-// --- Prediction Modal Content ---
 const PredictionContent = ({ result, onClose }: { result: PredictionResult, onClose: () => void }) => {
     const isBull = result.bias === 'ALCISTA';
     const accentColor = isBull 
@@ -190,7 +240,6 @@ const PredictionContent = ({ result, onClose }: { result: PredictionResult, onCl
     );
 };
 
-// --- Settings Content ---
 const SettingsContent = ({ config, setConfig }: any) => {
     return (
         <div className="space-y-6">
@@ -243,7 +292,6 @@ const SettingsContent = ({ config, setConfig }: any) => {
     );
 }
 
-
 // --- Main App ---
 
 export default function App() {
@@ -255,6 +303,7 @@ export default function App() {
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
   const [dynamicWatchlist, setDynamicWatchlist] = useState<string[]>(WATCHLIST);
   const [isWatchlistLoaded, setIsWatchlistLoaded] = useState(false);
+  
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>(DEFAULT_TIMEFRAME);
   const [isScanning, setIsScanning] = useState(true);
@@ -268,6 +317,9 @@ export default function App() {
   const [predictionResult, setPredictionResult] = useState<PredictionResult | null>(null);
   const [isPredictionModalOpen, setIsPredictionModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  
+  // GLOBAL LOADER STATE
+  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
 
   // Config State
   const [alertConfig, setAlertConfig] = useState<AlertConfig>(() => {
@@ -305,14 +357,29 @@ export default function App() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Save config
   useEffect(() => {
     localStorage.setItem('quantmind_alert_config', JSON.stringify(alertConfig));
   }, [alertConfig]);
 
   const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-  // Load Market Data logic (Same as before)
+  // --- GLOBAL LOADER WRAPPER ---
+  // Wraps an async action. Displays loader.
+  // Enforces max 2s visibility. If action finishes faster, loader hides.
+  // If action takes longer, loader hides at 2s (background loading).
+  const withLoader = async (fn: () => void | Promise<any>) => {
+    setIsGlobalLoading(true);
+    const maxTime = new Promise((resolve) => setTimeout(resolve, 2000));
+    const action = async () => { await fn(); };
+    
+    // Race: Whichever finishes first triggers logic
+    // But we actually want the loader to hide EITHER when action finishes OR at 2s.
+    await Promise.race([action(), maxTime]);
+    setIsGlobalLoading(false);
+  };
+
+  // --- Data Logic ---
+
   useEffect(() => {
     const initMarket = async () => {
       try {
@@ -323,11 +390,11 @@ export default function App() {
     initMarket();
   }, []);
 
-  // Detail Data Logic
-  const loadDetailData = async (symbol: string) => {
+  // Fetch Chart Data
+  const loadDetailData = async (symbol: string, tf: Timeframe) => {
     setChartData([]); setSrLevels([]); setAiAnalysis(""); 
     try {
-        const candles = await fetchCandles(symbol, activeTimeframe);
+        const candles = await fetchCandles(symbol, tf);
         if (!candles || candles.length < 50) return;
         const chartWithIndicators = candles.map((c, i) => ({
             ...c,
@@ -339,7 +406,80 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
-  useEffect(() => { if (selectedSymbol) loadDetailData(selectedSymbol); }, [selectedSymbol, activeTimeframe]); 
+  // Interaction Handlers (Wrapped with Global Loader)
+  const handleSymbolSelect = (symbol: string) => {
+      if (symbol === selectedSymbol) return;
+      withLoader(async () => {
+          setSelectedSymbol(symbol);
+          await loadDetailData(symbol, activeTimeframe);
+      });
+  };
+
+  const handleTimeframeChange = (tf: Timeframe) => {
+      if (tf === activeTimeframe) return;
+      withLoader(async () => {
+          setActiveTimeframe(tf);
+          setMarketData([]); // Clear scanner list to show fresh state
+          if (selectedSymbol) {
+              await loadDetailData(selectedSymbol, tf);
+          }
+      });
+  };
+
+  const handlePredict = () => {
+      if (!selectedSymbol) return;
+      const analysis = marketData.find(m => m.symbol === selectedSymbol);
+      if (!analysis) return;
+      
+      withLoader(async () => {
+          // Fake delay for "Thinking" feel if calculation is too fast
+          await wait(600); 
+          const result = generatePrediction(analysis, srLevels);
+          setPredictionResult(result);
+          setIsPredictionModalOpen(true);
+      });
+  };
+
+  const handleAI = async () => {
+    if (!selectedSymbol) return;
+    const analysis = marketData.find(m => m.symbol === selectedSymbol);
+    if (!analysis) return;
+
+    if (typeof window !== 'undefined' && (window as any).aistudio) {
+        try {
+            const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+            if (!hasKey) await (window as any).aistudio.openSelectKey();
+        } catch (e) { return; }
+    }
+
+    setIsAnalyzing(true);
+    withLoader(async () => {
+        try {
+            const res = await generateAIAnalysis(analysis);
+            setAiAnalysis(res);
+        } catch (e: any) {
+            setAiAnalysis(e.message || "Error");
+        } finally { setIsAnalyzing(false); }
+    });
+  };
+
+  const toggleSettings = () => {
+      withLoader(() => {
+          setIsSettingsOpen(!isSettingsOpen);
+      });
+  };
+
+  const toggleTheme = () => {
+      withLoader(() => {
+          setTheme(theme === 'dark' ? 'light' : 'dark');
+      });
+  };
+  
+  const toggleScanning = () => {
+      withLoader(() => {
+          setIsScanning(!isScanning);
+      });
+  };
 
   // Scan Logic
   const runScan = useCallback(async () => {
@@ -394,35 +534,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [runScan]);
 
-  // Handlers
-  const triggerPrediction = () => {
-    if (!selectedSymbol) return;
-    const analysis = marketData.find(m => m.symbol === selectedSymbol);
-    if (!analysis) return;
-    const result = generatePrediction(analysis, srLevels);
-    setPredictionResult(result);
-    setIsPredictionModalOpen(true);
-  };
-
-  const triggerAI = async () => {
-    if (!selectedSymbol) return;
-    const analysis = marketData.find(m => m.symbol === selectedSymbol);
-    if (!analysis) return;
-    if (typeof window !== 'undefined' && (window as any).aistudio) {
-        try {
-            const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-            if (!hasKey) await (window as any).aistudio.openSelectKey();
-        } catch (e) { return; }
-    }
-    setIsAnalyzing(true);
-    try {
-        const res = await generateAIAnalysis(analysis);
-        setAiAnalysis(res);
-    } catch (e: any) {
-        setAiAnalysis(e.message || "Error");
-    } finally { setIsAnalyzing(false); }
-  };
-
   const activeMarket = marketData.find(m => m.symbol === selectedSymbol);
 
   // --- RENDER ---
@@ -430,25 +541,27 @@ export default function App() {
   return (
     <div className="min-h-screen pb-safe transition-colors duration-300">
       
+      <GlobalInteractionLoader visible={isGlobalLoading} />
+
       {/* 1. MAIN SCANNER VIEW */}
       <div className={`transition-all duration-300 ${selectedSymbol ? 'opacity-0 pointer-events-none hidden' : 'opacity-100'}`}>
         
         {/* HEADER */}
         <header className="sticky top-0 z-40 bg-street-light/90 dark:bg-street-dark/90 backdrop-blur border-b-2 border-black dark:border-white px-4 py-3">
            <div className="flex justify-between items-center mb-3">
-              <h1 className="font-extrabold text-xl tracking-tighter italic flex items-center gap-1">
-                 QUANT<span className="text-street-acid">MIND</span>
-                 <div className="w-2 h-2 bg-street-acid rounded-full animate-pulse ml-1" />
+              <h1 className="font-extrabold text-xl tracking-tighter italic flex items-center gap-2">
+                 THE<span className="text-street-acid">MIND</span>
+                 <BrainLoader size="sm" />
               </h1>
               <div className="flex items-center gap-3">
-                  <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 border-2 border-transparent hover:border-black dark:hover:border-white rounded-lg transition-all">
+                  <button onClick={toggleTheme} className="p-2 border-2 border-transparent hover:border-black dark:hover:border-white rounded-lg transition-all">
                       {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
                   </button>
-                  <button onClick={() => setIsSettingsOpen(true)} className={`p-2 border-2 border-black dark:border-white rounded-lg shadow-brutal-sm active:shadow-none active:translate-y-1 transition-all ${alertConfig.enabled ? 'bg-street-acid text-black' : 'bg-transparent'}`}>
+                  <button onClick={toggleSettings} className={`p-2 border-2 border-black dark:border-white rounded-lg shadow-brutal-sm active:shadow-none active:translate-y-1 transition-all ${alertConfig.enabled ? 'bg-street-acid text-black' : 'bg-transparent'}`}>
                      <BellIcon />
                   </button>
                   <button 
-                    onClick={() => setIsScanning(!isScanning)}
+                    onClick={toggleScanning}
                     className={`text-[10px] font-bold px-2 py-2 rounded-lg border-2 border-black dark:border-white shadow-brutal-sm active:shadow-none active:translate-y-1 transition-all ${isScanning ? 'bg-street-acid text-black' : 'bg-street-pink text-white'}`}
                   >
                      {isScanning ? 'LIVE' : 'PAUSE'}
@@ -461,7 +574,7 @@ export default function App() {
               {[Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4].map(tf => (
                  <button 
                     key={tf}
-                    onClick={() => { setActiveTimeframe(tf); setMarketData([]); }}
+                    onClick={() => handleTimeframeChange(tf)}
                     className={`whitespace-nowrap px-4 py-1 rounded-lg text-xs font-bold border-2 border-black dark:border-white transition-all ${
                         activeTimeframe === tf 
                         ? 'bg-black text-white dark:bg-white dark:text-black shadow-brutal-sm' 
@@ -477,9 +590,8 @@ export default function App() {
         {/* FEED */}
         <main className="p-4 pb-20 space-y-2 min-h-screen">
            {marketData.length === 0 && isScanning && (
-               <div className="flex flex-col items-center justify-center py-20 opacity-50 animate-pulse">
-                   <div className="text-4xl mb-4">👀</div>
-                   <p className="font-bold uppercase tracking-widest text-sm">Escaneando...</p>
+               <div className="flex flex-col items-center justify-center py-24 opacity-80 animate-in fade-in">
+                   <BrainLoader size="xl" label="ESCANEANDO" />
                </div>
            )}
            {marketData.map(item => (
@@ -487,7 +599,7 @@ export default function App() {
                  key={item.symbol} 
                  data={item} 
                  isLoading={!!loadingMap[item.symbol]}
-                 onClick={() => setSelectedSymbol(item.symbol)} 
+                 onClick={() => handleSymbolSelect(item.symbol)} 
               />
            ))}
            <div className="h-12"></div>
@@ -507,7 +619,7 @@ export default function App() {
                   <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase">{activeTimeframe} • REALTIME</span>
                </div>
                <button 
-                  onClick={triggerPrediction}
+                  onClick={handlePredict}
                   disabled={!!loadingMap[selectedSymbol]}
                   className="bg-street-purple text-white border-2 border-black dark:border-white shadow-brutal-sm px-3 py-2 rounded-lg flex items-center gap-1 active:shadow-none active:translate-y-1 transition-all"
                >
@@ -562,7 +674,7 @@ export default function App() {
                                Generá un resumen de estructura de mercado.
                            </p>
                            <button 
-                              onClick={triggerAI}
+                              onClick={handleAI}
                               className="w-full py-3 bg-black dark:bg-white text-white dark:text-black font-bold text-sm uppercase rounded border-2 border-transparent active:scale-[0.98] transition-all"
                            >
                               Generar Intel
@@ -571,8 +683,8 @@ export default function App() {
                    )}
 
                    {isAnalyzing && (
-                       <div className="py-8 flex flex-col items-center justify-center relative z-10 animate-pulse">
-                           <span className="text-xs font-bold uppercase">Pensando...</span>
+                       <div className="py-8 flex flex-col items-center justify-center relative z-10">
+                           <BrainLoader size="lg" label="PROCESANDO" />
                        </div>
                    )}
 
@@ -581,7 +693,7 @@ export default function App() {
                            <p className="text-sm font-medium leading-relaxed font-mono text-gray-800 dark:text-gray-200">
                                {aiAnalysis}
                            </p>
-                           <button onClick={triggerAI} className="mt-4 text-xs font-bold uppercase underline text-gray-500">Actualizar</button>
+                           <button onClick={handleAI} className="mt-4 text-xs font-bold uppercase underline text-gray-500">Actualizar</button>
                        </div>
                    )}
                </div>
