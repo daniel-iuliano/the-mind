@@ -5,7 +5,7 @@ const COINEX_BASE_URL = "https://api.coinex.com/v1";
 const setCorsHeaders = (res: any) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
 };
 
 const readQueryValue = (value: string | string[] | undefined) => {
@@ -21,6 +21,11 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
+  if (req.method !== "GET") {
+    res.status(405).json({ error: "Method not allowed." });
+    return;
+  }
+
   const path = readQueryValue(req.query?.path);
 
   if (!path) {
@@ -28,7 +33,19 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const targetUrl = new URL(`${COINEX_BASE_URL}${path}`);
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    res.status(400).json({ error: "Path must be relative to the CoinEx API." });
+    return;
+  }
+
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(`${COINEX_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`);
+  } catch (error) {
+    console.error("Invalid CoinEx proxy URL:", error);
+    res.status(400).json({ error: "Invalid 'path' query parameter." });
+    return;
+  }
   const queryParams = req.query ?? {};
 
   Object.entries(queryParams).forEach(([key, value]) => {
