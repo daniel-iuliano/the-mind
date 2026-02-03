@@ -1,8 +1,9 @@
 import { MarketAnalysis, AlertConfig, SignalBias, PredictionResult } from "../types";
+import { TRANSLATIONS, translateReason, Language } from "./i18n";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org/bot";
 
-export const testTelegramConnection = async (token: string, chatId: string): Promise<boolean> => {
+export const testTelegramConnection = async (token: string, chatId: string, lang: Language): Promise<boolean> => {
   try {
     const url = `${TELEGRAM_API_BASE}${token}/getMe`;
     const res = await fetch(url);
@@ -10,7 +11,8 @@ export const testTelegramConnection = async (token: string, chatId: string): Pro
     if (!data.ok) return false;
 
     // Send a test message
-    await sendTelegramMessage(token, chatId, "🔌 QuantMind: Conexión de Alertas Exitosa.");
+    const msg = lang === 'ES' ? "🔌 QuantMind: Conexión de Alertas Exitosa." : "🔌 QuantMind: Alerts Connected Successfully.";
+    await sendTelegramMessage(token, chatId, msg);
     return true;
   } catch (e) {
     console.error("Telegram connection failed", e);
@@ -39,41 +41,43 @@ export const sendTelegramMessage = async (token: string, chatId: string, text: s
 export const formatAlertMessage = (
   analysis: MarketAnalysis, 
   timeframe: string,
-  prediction: PredictionResult | null = null
+  prediction: PredictionResult | null,
+  lang: Language
 ): string => {
+  const t = TRANSLATIONS[lang];
   const isBuy = analysis.bias.includes('BUY');
   const emoji = isBuy ? '🚀' : '🔻';
   const colorCircle = isBuy ? '🟢' : '🔴';
   
-  // Format Reasons as bullet points
-  const reasonList = analysis.reasons.map(r => `• ${r}`).join('\n');
+  // Format Reasons as bullet points, translated
+  const reasonList = analysis.reasons.map(r => `• ${translateReason(r, lang)}`).join('\n');
 
   let message = `
-${emoji} <b>QUANTMIND ALERT</b> ${emoji}
+${emoji} <b>${t.ALERT_HEADER}</b> ${emoji}
 
 ${colorCircle} <b>${analysis.symbol}</b>
-⏱ <b>Timeframe:</b> ${timeframe}
-🧭 <b>Signal:</b> ${analysis.bias}
-💯 <b>Score:</b> ${Math.round(analysis.score)}/100
+⏱ <b>${t.ALERT_TIMEFRAME}:</b> ${timeframe}
+🧭 <b>${t.ALERT_SIGNAL}:</b> ${analysis.bias}
+💯 <b>${t.ALERT_SCORE}:</b> ${Math.round(analysis.score)}/100
 
 📊 <b>Key Data:</b>
-• Price: $${analysis.price}
+• ${t.ALERT_PRICE}: $${analysis.price}
 • RSI: ${analysis.indicators.rsi.toFixed(1)}
-• Vol 24h: $${(analysis.volume24h / 1000).toFixed(0)}k
+• ${t.VOL} 24h: $${(analysis.volume24h / 1000).toFixed(0)}k
 
-📝 <b>Drivers:</b>
+📝 <b>${t.ALERT_DRIVERS}:</b>
 ${reasonList}`;
 
   // Append Prediction Section if available
   if (prediction) {
     message += `
 
-🔮 <b>PREDICT MODE</b>
-🎲 <b>Probabilidad:</b> ${prediction.probability}%
+🔮 <b>${t.ALERT_PREDICT}</b>
+🎲 <b>${t.ALERT_PROB}:</b> ${prediction.probability}%
 🎯 <b>Target:</b> ${prediction.targetPrice ? '$' + prediction.targetPrice.toFixed(prediction.targetPrice < 1 ? 4 : 2) : 'N/A'}
 🛑 <b>Stop Loss:</b> ${prediction.stopLoss ? '$' + prediction.stopLoss.toFixed(prediction.stopLoss < 1 ? 4 : 2) : 'N/A'}
 
-⚠️ <i>Outlook probabilístico. No es consejo financiero.</i>`;
+⚠️ <i>${t.ALERT_OUTLOOK}</i>`;
   }
 
   message += `
@@ -113,7 +117,7 @@ export const shouldSendAlert = (
   // 4. Specific Event Logic (Overrides score if critical?)
   // For simplicity, we require the score to meet threshold AND specific events if checked
   if (config.events.volumeSpike) {
-     const hasVolumeSpike = analysis.reasons.some(r => r.includes("Volumen"));
+     const hasVolumeSpike = analysis.reasons.some(r => r.includes("VOL"));
      if (!hasVolumeSpike && analysis.score < threshold) return false;
   }
 

@@ -69,11 +69,11 @@ export const generatePrediction = (
 
   // --- Reasoning ---
   const reasoning = [...analysis.reasons];
-  if (volatilityPct > 2) reasoning.push("Alta Volatilidad (Riesgo Aumentado)");
+  if (volatilityPct > 2) reasoning.push("HIGH_VOL_RISK");
   if (targetPrice && stopLoss) {
       const reward = Math.abs(targetPrice - currentPrice);
       const risk = Math.abs(currentPrice - stopLoss);
-      if (risk > 0 && (reward / risk) > 1.5) reasoning.push(`Ratio R/B Favorable (> 1.5)`);
+      if (risk > 0 && (reward / risk) > 1.5) reasoning.push("RR_FAVORABLE");
   }
 
   return {
