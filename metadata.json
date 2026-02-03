@@ -1,0 +1,5 @@
+{
+  "name": "QuantMind - Crypto Intelligence Agent",
+  "description": "A read-only trading intelligence platform that scans crypto markets, calculates technical indicators, scores setups, and uses AI to summarize market structure.",
+  "requestFramePermissions": []
+}
