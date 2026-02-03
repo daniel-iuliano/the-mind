@@ -5,12 +5,35 @@ const COINEX_BASE_URL = "https://api.coinex.com/v1";
 const setCorsHeaders = (res: any) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Origin, X-Requested-With");
+  res.setHeader("Access-Control-Max-Age", "86400");
 };
 
 const readQueryValue = (value: string | string[] | undefined) => {
   if (!value) return undefined;
   return Array.isArray(value) ? value[0] : value;
+};
+
+const getQueryParams = (req: any): Record<string, string | string[]> => {
+  if (req?.query && typeof req.query === "object") {
+    return req.query;
+  }
+
+  if (!req?.url) {
+    return {};
+  }
+
+  const baseUrl = `http://${req.headers?.host ?? "localhost"}`;
+  const parsedUrl = new URL(req.url, baseUrl);
+  const params: Record<string, string> = {};
+
+  parsedUrl.searchParams.forEach((value, key) => {
+    if (!(key in params)) {
+      params[key] = value;
+    }
+  });
+
+  return params;
 };
 
 export default async function handler(req: any, res: any) {
@@ -26,7 +49,8 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const path = readQueryValue(req.query?.path);
+  const queryParams = getQueryParams(req);
+  const path = readQueryValue(queryParams.path);
 
   if (!path) {
     res.status(400).json({ error: "Missing 'path' query parameter." });
@@ -46,8 +70,6 @@ export default async function handler(req: any, res: any) {
     res.status(400).json({ error: "Invalid 'path' query parameter." });
     return;
   }
-  const queryParams = req.query ?? {};
-
   Object.entries(queryParams).forEach(([key, value]) => {
     if (key === "path") return;
     const normalized = readQueryValue(value as string | string[] | undefined);
