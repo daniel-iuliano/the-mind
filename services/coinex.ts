@@ -1,11 +1,16 @@
 import { OHLCV, Timeframe } from "../types";
-import { COINEX_BASE_URL } from "../constants";
 
-// Helper to prevent rate limiting (politeness delay)
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const COINEX_PROXY_PATH = "/api/coinex";
 
-// CORS Proxy is required for browser-based requests to CoinEx public API
-const CORS_PROXY = "https://corsproxy.io/?";
+const buildProxyUrl = (path: string, params?: Record<string, string | number>) => {
+  const search = new URLSearchParams({ path });
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      search.set(key, String(value));
+    });
+  }
+  return `${COINEX_PROXY_PATH}?${search.toString()}`;
+};
 
 // Generate CoinEx Trading URL
 export const getExchangeUrl = (symbol: string): string => {
@@ -21,8 +26,7 @@ export const getExchangeUrl = (symbol: string): string => {
 
 // Fetch snapshot of all tickers to determine top volume pairs
 export const fetchTop30Markets = async (): Promise<string[]> => {
-  const targetUrl = `${COINEX_BASE_URL}/market/ticker/all`;
-  const proxiedUrl = `${CORS_PROXY}${encodeURIComponent(targetUrl)}`;
+  const proxiedUrl = buildProxyUrl("/market/ticker/all");
 
   try {
     const response = await fetch(proxiedUrl);
@@ -56,8 +60,7 @@ export const fetchTop30Markets = async (): Promise<string[]> => {
 };
 
 export const fetchTicker = async (symbol: string): Promise<{ last: number, vol: number, change: number } | null> => {
-    const targetUrl = `${COINEX_BASE_URL}/market/ticker?market=${symbol}`;
-    const proxiedUrl = `${CORS_PROXY}${encodeURIComponent(targetUrl)}`;
+    const proxiedUrl = buildProxyUrl("/market/ticker", { market: symbol });
 
     try {
         const response = await fetch(proxiedUrl);
@@ -85,8 +88,11 @@ export const fetchTicker = async (symbol: string): Promise<{ last: number, vol: 
 export const fetchCandles = async (symbol: string, timeframe: Timeframe): Promise<OHLCV[]> => {
   // Construct the URL for CoinEx Public API
   // Added limit=100 to ensure we have enough data for indicators but not too much to overload
-  const targetUrl = `${COINEX_BASE_URL}/market/kline?market=${symbol}&type=${timeframe}&limit=100`;
-  const proxiedUrl = `${CORS_PROXY}${encodeURIComponent(targetUrl)}`;
+  const proxiedUrl = buildProxyUrl("/market/kline", {
+    market: symbol,
+    type: timeframe,
+    limit: 100,
+  });
 
   try {
     const response = await fetch(proxiedUrl, {
