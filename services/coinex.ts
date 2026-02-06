@@ -24,6 +24,12 @@ export const getExchangeUrl = (symbol: string): string => {
   return `https://www.coinex.com/exchange/${formatted}`;
 };
 
+// Generate CoinEx App Deep Link
+export const getExchangeAppUrl = (symbol: string): string => {
+  // CoinEx app expects the market symbol without a dash, e.g., BTCUSDT.
+  return `coinex://exchange?market=${symbol}`;
+};
+
 // Fetch snapshot of all tickers to determine top volume pairs
 export const fetchTop30Markets = async (): Promise<string[]> => {
   const proxiedUrl = buildProxyUrl("/market/ticker/all");
