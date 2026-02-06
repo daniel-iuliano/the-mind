@@ -109,6 +109,8 @@ const MarketCard = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }:
   const t = TRANSLATIONS[lang];
   const isBull = data.bias.includes('BUY');
   const isBear = data.bias.includes('SELL');
+  const hasEarlySignal = data.earlySignal.side !== 'NEUTRAL' && data.earlySignal.confidence > 0;
+  const earlyLabel = data.earlySignal.side === 'LONG' ? t.EARLY_LONG : t.EARLY_SHORT;
 
   return (
     <div onClick={onClick} className={`group bg-street-cardLight dark:bg-street-cardDark rounded-xl p-4 mb-3 border-2 transition-all cursor-pointer relative overflow-hidden ${isFavorite ? 'border-yellow-400 dark:border-yellow-400 ring-1 ring-yellow-400/50' : 'border-black dark:border-white shadow-brutal active:shadow-none active:translate-x-[4px] active:translate-y-[4px]'}`}>
@@ -125,6 +127,14 @@ const MarketCard = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }:
                {data.change24h > 0 ? '▲' : '▼'} {Math.abs(data.change24h).toFixed(2)}%
              </span>
           </div>
+          {hasEarlySignal && (
+            <div className="mt-2 text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300 flex items-center gap-2">
+              <span className={`px-1.5 py-0.5 border border-black/60 dark:border-white/40 ${data.earlySignal.side === 'LONG' ? 'text-green-700 dark:text-street-acid' : 'text-pink-600 dark:text-street-pink'}`}>
+                {earlyLabel}
+              </span>
+              <span>{data.earlySignal.confidence}%</span>
+            </div>
+          )}
         </div>
         <div className="flex flex-col items-end gap-2">
             <div className={`w-8 h-8 flex items-center justify-center rounded-full border-2 border-black dark:border-white font-extrabold text-xs ${data.score >= 70 ? 'bg-street-acid text-black' : data.score <= 30 ? 'bg-street-pink text-white' : 'bg-gray-200 text-gray-800'}`}>{Math.round(data.score)}</div>
@@ -655,6 +665,25 @@ export default function App() {
                         <span key={i} className="bg-transparent border-2 border-black dark:border-white/20 rounded px-2 py-1 text-[10px] font-bold uppercase text-gray-700 dark:text-gray-300">{translateReason(r, lang)}</span>
                      ))}
                   </div>
+               </div>
+               <div className="px-4 pb-4">
+                  <h3 className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400 mb-2">{t.EARLY_SIGNAL}</h3>
+                  {activeMarket.earlySignal.side === 'NEUTRAL' ? (
+                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400">{t.NO_EARLY_SIGNAL}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-bold uppercase">
+                        <span className={`${activeMarket.earlySignal.side === 'LONG' ? 'text-green-700 dark:text-street-acid' : 'text-pink-600 dark:text-street-pink'}`}>
+                          {activeMarket.earlySignal.side === 'LONG' ? t.EARLY_LONG : t.EARLY_SHORT}
+                        </span>
+                        <span className="text-gray-500 dark:text-gray-400">{t.CERTAINTY}: {activeMarket.earlySignal.confidence}%</span>
+                      </div>
+                      <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        <span className="font-bold uppercase text-gray-500 dark:text-gray-400 mr-2">{t.WHY}:</span>
+                        {activeMarket.earlySignal.reasons.map((reason) => translateReason(reason, lang)).join(' · ')}
+                      </p>
+                    </div>
+                  )}
                </div>
                <div className="mx-4 mb-8 p-4 border-2 border-black dark:border-white bg-gradient-to-br from-street-acid/20 to-transparent rounded-xl shadow-brutal relative overflow-hidden">
                    <div className="flex justify-between items-start mb-2 relative z-10"><h3 className="font-bold text-sm uppercase flex items-center gap-2">🤖 {t.AI_ANALYSIS}</h3></div>

@@ -117,6 +117,76 @@ export const scoreMarket = (symbol: string, price: number, indicators: Indicator
   else if (score <= 100 - SCORING.THRESHOLD_STRONG) bias = SignalBias.STRONG_SELL;
   else if (score <= 40) bias = SignalBias.SELL;
 
+  // Early Signal Detection (Possible Shorts/Longs)
+  const earlyLongReasons: string[] = [];
+  const earlyShortReasons: string[] = [];
+  let earlyLongScore = 0;
+  let earlyShortScore = 0;
+
+  if (price > indicators.ema20 && indicators.ema20 > indicators.ema50) {
+    earlyLongScore += 20;
+    earlyLongReasons.push("EARLY_EMA_BULL");
+  } else if (price < indicators.ema20 && indicators.ema20 < indicators.ema50) {
+    earlyShortScore += 20;
+    earlyShortReasons.push("EARLY_EMA_BEAR");
+  }
+
+  if (indicators.macd.macd > indicators.macd.signal && indicators.macd.histogram > 0) {
+    earlyLongScore += 20;
+    earlyLongReasons.push("EARLY_MACD_BULL");
+  } else if (indicators.macd.macd < indicators.macd.signal && indicators.macd.histogram < 0) {
+    earlyShortScore += 20;
+    earlyShortReasons.push("EARLY_MACD_BEAR");
+  }
+
+  if (indicators.stochRsi.k > indicators.stochRsi.d && indicators.stochRsi.k < 30) {
+    earlyLongScore += 15;
+    earlyLongReasons.push("EARLY_STOCH_BULL");
+  } else if (indicators.stochRsi.k < indicators.stochRsi.d && indicators.stochRsi.k > 70) {
+    earlyShortScore += 15;
+    earlyShortReasons.push("EARLY_STOCH_BEAR");
+  }
+
+  if (indicators.rsi > 52 && indicators.rsi < 60) {
+    earlyLongScore += 10;
+    earlyLongReasons.push("EARLY_RSI_BULL");
+  } else if (indicators.rsi < 48 && indicators.rsi > 40) {
+    earlyShortScore += 10;
+    earlyShortReasons.push("EARLY_RSI_BEAR");
+  }
+
+  if (price > indicators.bb.middle) {
+    earlyLongScore += 10;
+    earlyLongReasons.push("EARLY_BB_BULL");
+  } else if (price < indicators.bb.middle) {
+    earlyShortScore += 10;
+    earlyShortReasons.push("EARLY_BB_BEAR");
+  }
+
+  const maxEarlyScore = Math.max(earlyLongScore, earlyShortScore);
+  const minEarlyScore = 35;
+  let earlySide: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
+  let earlyReasons: string[] = [];
+
+  if (earlyLongScore >= minEarlyScore && earlyLongScore >= earlyShortScore + 10) {
+    earlySide = 'LONG';
+    earlyReasons = earlyLongReasons;
+  } else if (earlyShortScore >= minEarlyScore && earlyShortScore >= earlyLongScore + 10) {
+    earlySide = 'SHORT';
+    earlyReasons = earlyShortReasons;
+  } else if (maxEarlyScore >= minEarlyScore) {
+    earlyReasons = earlyLongScore >= earlyShortScore ? earlyLongReasons : earlyShortReasons;
+    earlyReasons.push("EARLY_SIGNAL_CONFLICT");
+  }
+
+  let earlyConfidence = Math.min(95, Math.round((maxEarlyScore / 75) * 100));
+  if (volatilityRatio < 0.005 && earlyConfidence > 0) {
+    earlyConfidence = Math.max(0, earlyConfidence - 10);
+    if (earlySide !== 'NEUTRAL') {
+      earlyReasons.push("EARLY_LOW_VOL");
+    }
+  }
+
   return {
     symbol,
     price,
@@ -126,6 +196,11 @@ export const scoreMarket = (symbol: string, price: number, indicators: Indicator
     score,
     bias,
     reasons,
+    earlySignal: {
+      side: earlySide,
+      confidence: earlyConfidence,
+      reasons: earlyReasons.slice(0, 3)
+    },
     timestamp: Date.now()
   };
 };
