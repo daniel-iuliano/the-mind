@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { fetchCandles, fetchTop30Markets, fetchTicker, getExchangeAppUrl } from './services/coinex';
+import { fetchCandles, fetchTop30Markets, fetchTicker, getExchangeAppUrl, getExchangeUrl } from './services/coinex';
 import { analyzeCandles, calculateSupportResistance } from './services/indicators';
 import { scoreMarket } from './services/analyzer';
 import { generateAIAnalysis } from './services/geminiService';
@@ -495,7 +495,13 @@ export default function App() {
   const executeHandoff = () => {
       if (!selectedSymbol) return;
       const appUrl = getExchangeAppUrl(selectedSymbol);
+      const webUrl = getExchangeUrl(selectedSymbol);
       window.location.assign(appUrl);
+      window.setTimeout(() => {
+          if (document.visibilityState === 'visible') {
+              window.open(webUrl, '_blank');
+          }
+      }, 1500);
       setIsPositionConfirmOpen(false);
       setIsPredictionModalOpen(false);
   };
