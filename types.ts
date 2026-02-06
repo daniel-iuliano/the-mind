@@ -52,6 +52,12 @@ export interface IndicatorValues {
   atr: number;
 }
 
+export interface EarlySignal {
+  side: 'LONG' | 'SHORT' | 'NEUTRAL';
+  confidence: number; // 0-100
+  reasons: string[];
+}
+
 export interface MarketAnalysis {
   symbol: string;
   price: number;
@@ -61,6 +67,7 @@ export interface MarketAnalysis {
   score: number; // 0 to 100
   bias: SignalBias;
   reasons: string[];
+  earlySignal: EarlySignal;
   timestamp: number;
 }
 
