@@ -177,9 +177,17 @@ export const REASON_CODES: Record<string, { ES: string, EN: string }> = {
   "MACD_HIST_BEAR": { ES: "MACD Decreciendo", EN: "MACD Shrinking" },
   "BB_BOUNCE_LOW": { ES: "Rebote Banda Inferior", EN: "Lower BB Bounce" },
   "BB_REJECT_HIGH": { ES: "Rechazo Banda Superior", EN: "Upper BB Rejection" },
+  "PRICE_MOMENTUM_BULL": { ES: "Momentum de Precio Alcista", EN: "Bullish Price Momentum" },
+  "PRICE_MOMENTUM_BEAR": { ES: "Momentum de Precio Bajista", EN: "Bearish Price Momentum" },
+  "BULL_TRAP_RISK": { ES: "Riesgo de Trampa Alcista", EN: "Bull Trap Risk" },
+  "BEAR_TRAP_RISK": { ES: "Riesgo de Trampa Bajista", EN: "Bear Trap Risk" },
   "LOW_VOLATILITY": { ES: "Baja Volatilidad", EN: "Low Volatility" },
   "VOL_CONFIRMATION": { ES: "Confirmación Volumen", EN: "Volume Confirmation" },
   "VOL_PRESSURE": { ES: "Presión de Venta", EN: "Sell Pressure" },
+  "VOL_SPIKE_UNCERTAIN": { ES: "Pico de Volumen Incierto", EN: "Unclear Volume Spike" },
+  "SIGNAL_CONFLICT": { ES: "Conflicto de Señales", EN: "Signal Conflict" },
+  "SIGNAL_STACK_BULL": { ES: "Señales Alcistas Acumuladas", EN: "Stacked Bull Signals" },
+  "SIGNAL_STACK_BEAR": { ES: "Señales Bajistas Acumuladas", EN: "Stacked Bear Signals" },
   "HIGH_VOL_RISK": { ES: "Alta Volatilidad (Riesgo)", EN: "High Volatility (Risk)" },
   "RR_FAVORABLE": { ES: "Ratio R/B Favorable", EN: "Favorable R/R Ratio" }
 };
