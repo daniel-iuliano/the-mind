@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { fetchCandles, fetchTop30Markets, fetchTicker, getExchangeUrl } from './services/coinex';
+import { fetchCandles, fetchTop30Markets, fetchTicker, getExchangeAppUrl } from './services/coinex';
 import { analyzeCandles, calculateSupportResistance } from './services/indicators';
 import { scoreMarket } from './services/analyzer';
 import { generateAIAnalysis } from './services/geminiService';
@@ -494,8 +494,8 @@ export default function App() {
   const clearKeys = () => { localStorage.removeItem('quantmind_keys'); setCoinexKeys(null); };
   const executeHandoff = () => {
       if (!selectedSymbol) return;
-      const url = getExchangeUrl(selectedSymbol);
-      window.open(url, '_blank');
+      const appUrl = getExchangeAppUrl(selectedSymbol);
+      window.location.assign(appUrl);
       setIsPositionConfirmOpen(false);
       setIsPredictionModalOpen(false);
   };
