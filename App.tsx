@@ -166,10 +166,15 @@ const ModalWrapper = ({ isOpen, onClose, title, children, color = "border-black 
     );
 };
 
-const PredictionContent = ({ result, onClose, onOpenPosition, lang }: { result: PredictionResult, onClose: () => void, onOpenPosition: () => void, lang: Language }) => {
+const PredictionContent = ({ result, currentPrice, onClose, onOpenPosition, lang }: { result: PredictionResult, currentPrice: number | null, onClose: () => void, onOpenPosition: () => void, lang: Language }) => {
     const t = TRANSLATIONS[lang];
     const isBull = result.bias === 'ALCISTA';
     const accentColor = isBull ? 'text-green-600 dark:text-street-acid' : result.bias === 'BAJISTA' ? 'text-pink-600 dark:text-street-pink' : 'text-gray-600 dark:text-gray-400';
+    const [desiredProfit, setDesiredProfit] = useState<string>('100');
+    const parsedDesiredProfit = Number(desiredProfit);
+    const perUnitProfit = result.targetPrice && currentPrice ? (isBull ? result.targetPrice - currentPrice : result.bias === 'BAJISTA' ? currentPrice - result.targetPrice : 0) : 0;
+    const estimatedUnits = parsedDesiredProfit > 0 && perUnitProfit > 0 ? parsedDesiredProfit / perUnitProfit : 0;
+    const estimatedCapital = estimatedUnits > 0 && currentPrice ? estimatedUnits * currentPrice : 0;
     
     return (
         <div className="space-y-5">
@@ -206,6 +211,31 @@ const PredictionContent = ({ result, onClose, onOpenPosition, lang }: { result: 
                         </li>
                     ))}
                 </ul>
+            </div>
+            <div className="p-4 border-2 border-black dark:border-white bg-street-cardLight dark:bg-street-cardDark rounded-xl space-y-3">
+                <div className="text-xs font-bold uppercase text-gray-600 dark:text-gray-300">{t.PROFIT_CONFIG}</div>
+                <label className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">{t.DESIRED_PROFIT}</label>
+                <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={desiredProfit}
+                    onChange={(e) => setDesiredProfit(e.target.value)}
+                    className="w-full bg-transparent border-2 border-black dark:border-white p-2 font-mono text-xs font-bold outline-none focus:border-street-acid text-street-dark dark:text-street-light"
+                />
+                <div className="grid grid-cols-2 gap-3 text-[10px] font-bold uppercase text-gray-600 dark:text-gray-300">
+                    <div className="p-2 border border-black/20 dark:border-white/20 rounded-lg">
+                        <div className="text-[9px]">{t.ESTIMATED_UNITS}</div>
+                        <div className="text-sm font-mono text-gray-800 dark:text-gray-100">{estimatedUnits > 0 ? estimatedUnits.toFixed(4) : '---'}</div>
+                    </div>
+                    <div className="p-2 border border-black/20 dark:border-white/20 rounded-lg">
+                        <div className="text-[9px]">{t.ESTIMATED_CAPITAL}</div>
+                        <div className="text-sm font-mono text-gray-800 dark:text-gray-100">{estimatedCapital > 0 ? `$${estimatedCapital.toFixed(2)}` : '---'}</div>
+                    </div>
+                </div>
+                {(!currentPrice || !result.targetPrice || perUnitProfit <= 0) && (
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400">{t.PROFIT_UNAVAILABLE}</p>
+                )}
             </div>
             <button onClick={onOpenPosition} className="w-full py-4 bg-street-cyan text-black font-extrabold text-sm uppercase tracking-widest border-2 border-black shadow-brutal active:shadow-none active:translate-x-1 active:translate-y-1 transition-all flex items-center justify-center gap-2 group">
                 <span>{t.OPEN_COINEX}</span>
@@ -509,6 +539,7 @@ export default function App() {
   const toggleSettings = () => withLoader(() => setIsSettingsOpen(!isSettingsOpen));
   const toggleTheme = () => withLoader(() => setTheme(theme === 'dark' ? 'light' : 'dark'));
   const toggleScanning = () => withLoader(() => setIsScanning(!isScanning));
+  const togglePredictMode = () => setAlertConfig((prev) => ({ ...prev, predictMode: !prev.predictMode }));
   
   const handleOpenPositionFlow = () => {
       if (!coinexKeys) setIsKeyModalOpen(true); else setIsPositionConfirmOpen(true);
@@ -638,6 +669,26 @@ export default function App() {
                <FilterButton label={t.FILTER_BULL} active={filter === 'BULL'} type="bull" onClick={() => handleFilterChange('BULL')} />
                <FilterButton label={t.FILTER_BEAR} active={filter === 'BEAR'} type="bear" onClick={() => handleFilterChange('BEAR')} />
            </div>
+           <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="flex items-center justify-between p-2 border-2 border-street-purple/50 bg-street-purple/10 rounded-lg">
+                  <div>
+                      <span className="text-[10px] font-bold uppercase text-street-purple block">{t.PREDICT_MODE}</span>
+                      <span className="text-[9px] font-medium text-gray-600 dark:text-gray-400">{t.MODE_ALWAYS_ON}</span>
+                  </div>
+                  <button onClick={togglePredictMode} className={`w-12 h-7 rounded-full border-2 border-black dark:border-white transition-colors relative ${alertConfig.predictMode ? 'bg-street-purple' : 'bg-gray-400'}`}>
+                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-black border border-white transition-transform ${alertConfig.predictMode ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+              </div>
+              <div className="flex items-center justify-between p-2 border-2 border-street-pink/50 bg-street-pink/10 rounded-lg">
+                  <div>
+                      <span className="text-[10px] font-bold uppercase text-street-pink block">{t.OPPOSITE_MODE}</span>
+                      <span className="text-[9px] font-medium text-gray-600 dark:text-gray-400">{t.MODE_ALWAYS_ON}</span>
+                  </div>
+                  <button onClick={() => setIsOppositeMode(prev => !prev)} className={`w-12 h-7 rounded-full border-2 border-black dark:border-white transition-colors relative ${isOppositeMode ? 'bg-street-pink' : 'bg-gray-400'}`}>
+                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-black border border-white transition-transform ${isOppositeMode ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+              </div>
+           </div>
         </header>
 
         <main className="p-4 pb-20 space-y-2 min-h-screen">
@@ -669,6 +720,14 @@ export default function App() {
                   <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase">{activeTimeframe} • {t.REALTIME}</span>
                </div>
                <button onClick={handlePredict} disabled={!!loadingMap[selectedSymbol]} className="bg-street-purple text-white border-2 border-black dark:border-white shadow-brutal-sm px-3 py-2 rounded-lg flex items-center gap-1 active:shadow-none active:translate-y-1 transition-all"><PredictIcon /><span className="text-xs font-bold">{t.PREDICT_BTN}</span></button>
+            </div>
+            <div className="flex gap-2 px-4 py-2 border-b-2 border-black/10 dark:border-white/10">
+                <button onClick={togglePredictMode} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${alertConfig.predictMode ? 'bg-street-purple text-white border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
+                    {t.PREDICT_MODE}
+                </button>
+                <button onClick={() => setIsOppositeMode(prev => !prev)} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${isOppositeMode ? 'bg-street-pink text-white border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
+                    {t.OPPOSITE_MODE}
+                </button>
             </div>
             <div className="flex-1 overflow-y-auto bg-street-light dark:bg-street-dark">
                <div className="h-[350px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
@@ -745,7 +804,7 @@ export default function App() {
           />
       </ModalWrapper>
       <ModalWrapper isOpen={isPredictionModalOpen} onClose={() => setIsPredictionModalOpen(false)} title={t.PREDICT_TITLE} color={predictionResult?.bias === 'ALCISTA' ? 'border-green-600 dark:border-street-acid' : predictionResult?.bias === 'BAJISTA' ? 'border-pink-600 dark:border-street-pink' : ''}>
-          {predictionResult && <PredictionContent result={predictionResult} onClose={() => setIsPredictionModalOpen(false)} onOpenPosition={handleOpenPositionFlow} lang={lang} />}
+          {predictionResult && <PredictionContent result={predictionResult} currentPrice={activeMarket?.price ?? null} onClose={() => setIsPredictionModalOpen(false)} onOpenPosition={handleOpenPositionFlow} lang={lang} />}
       </ModalWrapper>
       <ModalWrapper isOpen={isKeyModalOpen} onClose={() => setIsKeyModalOpen(false)} title={t.KEYS_TITLE}>
           <CoinExKeyModal onSave={saveKeys} onClose={() => setIsKeyModalOpen(false)} lang={lang} />
