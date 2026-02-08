@@ -358,10 +358,7 @@ const PositionConfirmationModal = ({ prediction, onConfirm, onCancel, lang }: { 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [filter, setFilter] = useState<'ALL' | 'BULL' | 'BEAR'>('ALL');
-  const [isOppositeMode, setIsOppositeMode] = useState(() => {
-      if (typeof localStorage === 'undefined') return false;
-      return localStorage.getItem('quantmind_opposite_mode') === 'true';
-  });
+  const [isOppositeMode, setIsOppositeMode] = useState(false);
   // Language State
   const [lang, setLang] = useState<Language>(() => {
       const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('lang') : null;
