@@ -5,6 +5,7 @@ import { scoreMarket } from './services/analyzer';
 import { generateAIAnalysis } from './services/geminiService';
 import { generatePrediction } from './services/predictor';
 import { sendTelegramMessage, formatAlertMessage, shouldSendAlert } from './services/telegram';
+import { invertMarketAnalysis, invertPrediction } from './services/opposite';
 import { WATCHLIST, DEFAULT_TIMEFRAME } from './constants';
 import { TRANSLATIONS, REASON_CODES, translateReason, Language } from './services/i18n';
 import { MarketAnalysis, OHLCV, Timeframe, SupportResistanceLevel, AlertConfig, PredictionResult } from './types';
@@ -215,7 +216,7 @@ const PredictionContent = ({ result, onClose, onOpenPosition, lang }: { result: 
     );
 };
 
-const SettingsContent = ({ config, setConfig, onClearKeys, lang }: any) => {
+const SettingsContent = ({ config, setConfig, isOppositeMode, onToggleOppositeMode, onClearKeys, lang }: any) => {
     const t = TRANSLATIONS[lang];
     return (
         <div className="space-y-6">
@@ -234,6 +235,18 @@ const SettingsContent = ({ config, setConfig, onClearKeys, lang }: any) => {
                     </div>
                     <button onClick={() => setConfig({...config, predictMode: !config.predictMode})} className={`w-14 h-8 rounded-full border-2 border-black dark:border-white transition-colors relative ${config.predictMode ? 'bg-street-purple' : 'bg-gray-400'}`}>
                         <div className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-black border border-white transition-transform ${config.predictMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </button>
+                </div>
+            </div>
+            <div className="p-4 border-2 border-street-pink/50 bg-street-pink/10 rounded-xl relative overflow-hidden">
+                <div className="absolute -right-4 -top-4 text-6xl opacity-20">🌓</div>
+                <div className="flex items-center justify-between relative z-10">
+                    <div>
+                        <span className="font-bold text-sm uppercase text-street-pink block">{t.OPPOSITE_MODE}</span>
+                        <span className="text-xs font-medium text-gray-600 dark:text-gray-400 max-w-[150px] block leading-tight mt-1">{t.OPPOSITE_DESC}</span>
+                    </div>
+                    <button onClick={onToggleOppositeMode} className={`w-14 h-8 rounded-full border-2 border-black dark:border-white transition-colors relative ${isOppositeMode ? 'bg-street-pink' : 'bg-gray-400'}`}>
+                        <div className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-black border border-white transition-transform ${isOppositeMode ? 'translate-x-6' : 'translate-x-0'}`} />
                     </button>
                 </div>
             </div>
@@ -315,6 +328,10 @@ const PositionConfirmationModal = ({ prediction, onConfirm, onCancel, lang }: { 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [filter, setFilter] = useState<'ALL' | 'BULL' | 'BEAR'>('ALL');
+  const [isOppositeMode, setIsOppositeMode] = useState(() => {
+      if (typeof localStorage === 'undefined') return false;
+      return localStorage.getItem('quantmind_opposite_mode') === 'true';
+  });
   // Language State
   const [lang, setLang] = useState<Language>(() => {
       const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('lang') : null;
@@ -381,6 +398,7 @@ export default function App() {
     else document.documentElement.classList.remove('dark');
     localStorage.setItem('theme', theme);
   }, [theme]);
+  useEffect(() => localStorage.setItem('quantmind_opposite_mode', String(isOppositeMode)), [isOppositeMode]);
   useEffect(() => localStorage.setItem('quantmind_favorites', JSON.stringify(favorites)), [favorites]);
   useEffect(() => localStorage.setItem('quantmind_alert_config', JSON.stringify(alertConfig)), [alertConfig]);
 
@@ -460,7 +478,8 @@ export default function App() {
       withLoader(async () => {
           await wait(600); 
           const result = generatePrediction(analysis, srLevels);
-          setPredictionResult(result);
+          const displayResult = isOppositeMode ? invertPrediction(result) : result;
+          setPredictionResult(displayResult);
           setIsPredictionModalOpen(true);
       });
   };
@@ -478,7 +497,8 @@ export default function App() {
     setIsAnalyzing(true);
     withLoader(async () => {
         try {
-            const res = await generateAIAnalysis(analysis, lang);
+            const displayAnalysis = isOppositeMode ? invertMarketAnalysis(analysis) : analysis;
+            const res = await generateAIAnalysis(displayAnalysis, lang);
             setAiAnalysis(res);
         } catch (e: any) {
             setAiAnalysis(e.message || "Error");
@@ -548,15 +568,19 @@ export default function App() {
             if (alertConfig.predictMode && analysis.score >= 75) {
                 const levels = calculateSupportResistance(candles);
                 prediction = generatePrediction(analysis, levels);
+                if (isOppositeMode) {
+                  prediction = invertPrediction(prediction);
+                }
             }
-            const msg = formatAlertMessage(analysis, activeTimeframe, prediction, langRef.current);
+            const displayAnalysis = isOppositeMode ? invertMarketAnalysis(analysis) : analysis;
+            const msg = formatAlertMessage(displayAnalysis, activeTimeframe, prediction, langRef.current);
             await sendTelegramMessage(alertConfig.telegramToken, alertConfig.telegramChatId, msg);
             lastAlertsRef.current.set(symbol, Date.now());
         }
       } catch (err) { /* quiet fail */ } finally { setLoadingMap(prev => ({ ...prev, [symbol]: false })); }
       await wait(200); 
     }
-  }, [isScanning, activeTimeframe, alertConfig, dynamicWatchlist, isWatchlistLoaded]);
+  }, [isScanning, activeTimeframe, alertConfig, dynamicWatchlist, isWatchlistLoaded, isOppositeMode]);
 
   useEffect(() => {
     runScan();
@@ -564,10 +588,14 @@ export default function App() {
     return () => clearInterval(interval);
   }, [runScan]);
 
-  const activeMarket = marketData.find(m => m.symbol === selectedSymbol);
+  const displayMarketData = useMemo(() => {
+      return isOppositeMode ? marketData.map(invertMarketAnalysis) : marketData;
+  }, [marketData, isOppositeMode]);
+
+  const activeMarket = displayMarketData.find(m => m.symbol === selectedSymbol);
 
   const displayData = useMemo(() => {
-      return marketData.filter(item => {
+      return displayMarketData.filter(item => {
           const isFav = favorites.includes(item.symbol);
           if (isFav) return true;
           if (filter === 'ALL') return true;
@@ -581,7 +609,7 @@ export default function App() {
           if (!aFav && bFav) return 1;
           return b.score - a.score;
       });
-  }, [marketData, favorites, filter]);
+  }, [displayMarketData, favorites, filter]);
 
   return (
     <div className="min-h-screen pb-safe transition-colors duration-300">
@@ -707,7 +735,14 @@ export default function App() {
       )}
 
       <ModalWrapper isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} title={t.CONFIG_TITLE}>
-          <SettingsContent config={alertConfig} setConfig={setAlertConfig} onClearKeys={clearKeys} lang={lang} />
+          <SettingsContent
+            config={alertConfig}
+            setConfig={setAlertConfig}
+            isOppositeMode={isOppositeMode}
+            onToggleOppositeMode={() => setIsOppositeMode(prev => !prev)}
+            onClearKeys={clearKeys}
+            lang={lang}
+          />
       </ModalWrapper>
       <ModalWrapper isOpen={isPredictionModalOpen} onClose={() => setIsPredictionModalOpen(false)} title={t.PREDICT_TITLE} color={predictionResult?.bias === 'ALCISTA' ? 'border-green-600 dark:border-street-acid' : predictionResult?.bias === 'BAJISTA' ? 'border-pink-600 dark:border-street-pink' : ''}>
           {predictionResult && <PredictionContent result={predictionResult} onClose={() => setIsPredictionModalOpen(false)} onOpenPosition={handleOpenPositionFlow} lang={lang} />}
