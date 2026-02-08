@@ -57,6 +57,7 @@ export const TRANSLATIONS = {
     PREDICT_DESC: "Reportes probabilísticos en señales fuertes.",
     OPPOSITE_MODE: "MODO OPUESTO",
     OPPOSITE_DESC: "Invierte lecturas y predicciones.",
+    MODE_ALWAYS_ON: "Siempre visible",
     SECURE_STORAGE: "ALMACENAMIENTO SEGURO",
     SECURE_DESC: "Las claves se guardan localmente en tu navegador.",
     API_KEY: "API KEY",
@@ -72,6 +73,11 @@ export const TRANSLATIONS = {
     STOP_LOSS: "STOP LOSS",
     ALPHA_INTEL: "ALPHA INTEL",
     OPEN_COINEX: "ABRIR EN COINEX",
+    PROFIT_CONFIG: "CONFIGURAR GANANCIA",
+    DESIRED_PROFIT: "GANANCIA DESEADA ($)",
+    ESTIMATED_UNITS: "UNIDADES EST.",
+    ESTIMATED_CAPITAL: "CAPITAL EST.",
+    PROFIT_UNAVAILABLE: "Configura un target válido para calcular la ganancia.",
 
     // Confirm
     PAIR: "PAR",
@@ -146,6 +152,7 @@ export const TRANSLATIONS = {
     PREDICT_DESC: "Probabilistic reports on strong signals.",
     OPPOSITE_MODE: "OPPOSITE MODE",
     OPPOSITE_DESC: "Inverts readings and predictions.",
+    MODE_ALWAYS_ON: "Always visible",
     SECURE_STORAGE: "SECURE STORAGE",
     SECURE_DESC: "Keys are stored locally in your browser.",
     API_KEY: "API KEY",
@@ -161,6 +168,11 @@ export const TRANSLATIONS = {
     STOP_LOSS: "STOP LOSS",
     ALPHA_INTEL: "ALPHA INTEL",
     OPEN_COINEX: "OPEN ON COINEX",
+    PROFIT_CONFIG: "PROFIT SETUP",
+    DESIRED_PROFIT: "DESIRED PROFIT ($)",
+    ESTIMATED_UNITS: "EST. UNITS",
+    ESTIMATED_CAPITAL: "EST. CAPITAL",
+    PROFIT_UNAVAILABLE: "Set a valid target to calculate profit.",
 
     // Confirm
     PAIR: "PAIR",
