@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { MarketAnalysis } from "../types";
 import { Language } from "./i18n";
+import { formatPrice } from "../utils/formatters";
 
 export const generateAIAnalysis = async (analysis: MarketAnalysis, lang: Language): Promise<string> => {
   try {
@@ -15,7 +16,7 @@ export const generateAIAnalysis = async (analysis: MarketAnalysis, lang: Languag
          prompt = `
           Actuá como un Analista de Mercado Crypto Senior, experto en el mercado argentino.
           Analizá los siguientes datos técnicos para ${analysis.symbol}:
-          - Precio: $${analysis.price.toFixed(2)}
+          - Precio: $${formatPrice(analysis.price)}
           - Puntaje Técnico: ${analysis.score.toFixed(0)}/100
           - Tendencia/Sesgo: ${analysis.bias}
           - RSI: ${analysis.indicators.rsi.toFixed(2)}
@@ -29,7 +30,7 @@ export const generateAIAnalysis = async (analysis: MarketAnalysis, lang: Languag
          prompt = `
           Act as a Senior Crypto Market Analyst.
           Analyze the following technical data for ${analysis.symbol}:
-          - Price: $${analysis.price.toFixed(2)}
+          - Price: $${formatPrice(analysis.price)}
           - Technical Score: ${analysis.score.toFixed(0)}/100
           - Trend/Bias: ${analysis.bias}
           - RSI: ${analysis.indicators.rsi.toFixed(2)}
