@@ -10,6 +10,7 @@ import { WATCHLIST, DEFAULT_TIMEFRAME } from './constants';
 import { TRANSLATIONS, REASON_CODES, translateReason, Language } from './services/i18n';
 import { MarketAnalysis, OHLCV, Timeframe, SupportResistanceLevel, AlertConfig, PredictionResult } from './types';
 import Chart from './components/Chart';
+import { formatPrice } from './utils/formatters';
 
 // --- Icons & Assets ---
 const MoonIcon = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>;
@@ -72,7 +73,7 @@ const PriceDisplay = ({ price }: { price: number }) => {
   }, [price]);
   return (
     <span className={`font-mono font-bold transition-all duration-300 ${flash === 'up' ? 'text-green-600 dark:text-street-acid scale-110 inline-block' : flash === 'down' ? 'text-pink-600 dark:text-street-pink scale-110 inline-block' : 'text-inherit'}`}>
-      ${price < 1 ? price.toFixed(5) : price.toFixed(2)}
+      ${formatPrice(price)}
     </span>
   );
 };
@@ -193,11 +194,11 @@ const PredictionContent = ({ result, currentPrice, onClose, onOpenPosition, lang
                 <div className="grid grid-cols-2 gap-4">
                     <div>
                          <div className="text-xs font-bold uppercase mb-1 text-gray-600 dark:text-gray-300">{t.TARGET}</div>
-                         <div className="text-lg font-mono font-bold text-green-700 dark:text-street-acid">{result.targetPrice ? `$${result.targetPrice.toFixed(result.targetPrice < 1 ? 5 : 2)}` : '---'}</div>
+                         <div className="text-lg font-mono font-bold text-green-700 dark:text-street-acid">{result.targetPrice ? `$${formatPrice(result.targetPrice)}` : '---'}</div>
                     </div>
                     <div>
                          <div className="text-xs font-bold uppercase mb-1 text-gray-600 dark:text-gray-300">{t.STOP_LOSS}</div>
-                         <div className="text-lg font-mono font-bold text-pink-700 dark:text-street-pink">{result.stopLoss ? `$${result.stopLoss.toFixed(result.stopLoss < 1 ? 5 : 2)}` : '---'}</div>
+                         <div className="text-lg font-mono font-bold text-pink-700 dark:text-street-pink">{result.stopLoss ? `$${formatPrice(result.stopLoss)}` : '---'}</div>
                     </div>
                 </div>
             </div>
@@ -335,11 +336,11 @@ const PositionConfirmationModal = ({ prediction, onConfirm, onCancel, lang }: { 
                      </div>
                      <div className="flex justify-between border-b border-black/10 dark:border-white/10 pb-1">
                          <span>{t.TARGET}</span>
-                         <span>${prediction.targetPrice?.toFixed(2) || '---'}</span>
+                         <span>{prediction.targetPrice ? `$${formatPrice(prediction.targetPrice)}` : '---'}</span>
                      </div>
                      <div className="flex justify-between">
                          <span>STOP</span>
-                         <span className="text-street-pink">${prediction.stopLoss?.toFixed(2) || '---'}</span>
+                         <span className="text-street-pink">{prediction.stopLoss ? `$${formatPrice(prediction.stopLoss)}` : '---'}</span>
                      </div>
                  </div>
             </div>

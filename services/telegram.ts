@@ -1,5 +1,6 @@
 import { MarketAnalysis, AlertConfig, SignalBias, PredictionResult } from "../types";
 import { TRANSLATIONS, translateReason, Language } from "./i18n";
+import { formatPrice } from "../utils/formatters";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org/bot";
 
@@ -61,7 +62,7 @@ ${colorCircle} <b>${analysis.symbol}</b>
 💯 <b>${t.ALERT_SCORE}:</b> ${Math.round(analysis.score)}/100
 
 📊 <b>Key Data:</b>
-• ${t.ALERT_PRICE}: $${analysis.price}
+• ${t.ALERT_PRICE}: $${formatPrice(analysis.price)}
 • RSI: ${analysis.indicators.rsi.toFixed(1)}
 • ${t.VOL} 24h: $${(analysis.volume24h / 1000).toFixed(0)}k
 
@@ -74,8 +75,8 @@ ${reasonList}`;
 
 🔮 <b>${t.ALERT_PREDICT}</b>
 🎲 <b>${t.ALERT_PROB}:</b> ${prediction.probability}%
-🎯 <b>Target:</b> ${prediction.targetPrice ? '$' + prediction.targetPrice.toFixed(prediction.targetPrice < 1 ? 4 : 2) : 'N/A'}
-🛑 <b>Stop Loss:</b> ${prediction.stopLoss ? '$' + prediction.stopLoss.toFixed(prediction.stopLoss < 1 ? 4 : 2) : 'N/A'}
+🎯 <b>Target:</b> ${prediction.targetPrice ? '$' + formatPrice(prediction.targetPrice) : 'N/A'}
+🛑 <b>Stop Loss:</b> ${prediction.stopLoss ? '$' + formatPrice(prediction.stopLoss) : 'N/A'}
 
 ⚠️ <i>${t.ALERT_OUTLOOK}</i>`;
   }

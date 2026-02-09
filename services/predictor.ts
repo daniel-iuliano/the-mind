@@ -1,4 +1,5 @@
 import { MarketAnalysis, SupportResistanceLevel, PredictionResult, SignalBias } from "../types";
+import { formatPrice } from "../utils/formatters";
 
 export const generatePrediction = (
   analysis: MarketAnalysis, 
@@ -79,7 +80,7 @@ export const generatePrediction = (
   return {
     symbol: analysis.symbol,
     bias: predictionBias,
-    entryZone: `$${currentPrice.toFixed(2)}`,
+    entryZone: `$${formatPrice(currentPrice)}`,
     targetPrice,
     stopLoss,
     probability,
