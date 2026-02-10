@@ -25,6 +25,16 @@ const StarIcon = ({ filled }: { filled: boolean }) => (
 );
 const LockIcon = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
 
+type MarketState = 'VERY_ACTIVE' | 'VOLATILE' | 'CALM' | 'IDEAL_TRADING' | 'WAIT';
+
+const MARKET_STATE_STYLES: Record<MarketState, string> = {
+  VERY_ACTIVE: 'text-orange-700 dark:text-orange-300 border-orange-500/40 bg-orange-500/10',
+  VOLATILE: 'text-pink-700 dark:text-pink-300 border-pink-500/40 bg-pink-500/10',
+  CALM: 'text-blue-700 dark:text-blue-300 border-blue-500/40 bg-blue-500/10',
+  IDEAL_TRADING: 'text-green-700 dark:text-green-300 border-green-500/40 bg-green-500/10',
+  WAIT: 'text-gray-700 dark:text-gray-300 border-gray-500/40 bg-gray-500/10',
+};
+
 // --- BRAIN LOADER COMPONENT ---
 interface BrainLoaderProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
@@ -376,6 +386,7 @@ export default function App() {
   }, [lang]);
 
   const [marketData, setMarketData] = useState<MarketAnalysis[]>([]);
+  const [marketOrder, setMarketOrder] = useState<string[]>(WATCHLIST);
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
   const [dynamicWatchlist, setDynamicWatchlist] = useState<string[]>(WATCHLIST);
   const [isWatchlistLoaded, setIsWatchlistLoaded] = useState(false);
@@ -448,6 +459,16 @@ export default function App() {
     };
     initMarket();
   }, []);
+
+  useEffect(() => {
+    setMarketOrder((prev) => {
+      const next = [...prev];
+      dynamicWatchlist.forEach((symbol) => {
+        if (!next.includes(symbol)) next.push(symbol);
+      });
+      return next;
+    });
+  }, [dynamicWatchlist]);
 
   const loadDetailData = async (symbol: string, tf: Timeframe) => {
     setChartData([]); setSrLevels([]); setAiAnalysis(""); 
@@ -586,9 +607,13 @@ export default function App() {
         const analysis = scoreMarket(symbol, livePrice, indicators, liveVolume, prevVolume, changeVal);
 
         setMarketData(prevData => {
-            const filtered = prevData.filter(d => d.symbol !== symbol);
-            const updated = [...filtered, analysis];
-            return updated.sort((a, b) => b.score - a.score);
+            const existingIndex = prevData.findIndex((d) => d.symbol === symbol);
+            if (existingIndex === -1) {
+              return [...prevData, analysis];
+            }
+            const updated = [...prevData];
+            updated[existingIndex] = analysis;
+            return updated;
         });
 
         const lastAlertTime = lastAlertsRef.current.get(symbol) || 0;
@@ -623,7 +648,40 @@ export default function App() {
 
   const activeMarket = displayMarketData.find(m => m.symbol === selectedSymbol);
 
+  const marketStatusSummary = useMemo(() => {
+      if (displayMarketData.length === 0) return null;
+      const changes = displayMarketData.map((item) => item.change24h);
+      const volumes = displayMarketData.map((item) => item.volume24h).filter((v) => Number.isFinite(v) && v > 0);
+      const avgAbsChange = changes.reduce((sum, change) => sum + Math.abs(change), 0) / changes.length;
+      const meanChange = changes.reduce((sum, change) => sum + change, 0) / changes.length;
+      const volatility = Math.sqrt(changes.reduce((sum, change) => sum + Math.pow(change - meanChange, 2), 0) / changes.length);
+      const avgScore = displayMarketData.reduce((sum, item) => sum + item.score, 0) / displayMarketData.length;
+      const sortedVolumes = [...volumes].sort((a, b) => a - b);
+      const medianVolume = sortedVolumes.length > 0 ? sortedVolumes[Math.floor(sortedVolumes.length / 2)] : 1;
+      const avgVolume = volumes.length > 0 ? volumes.reduce((sum, vol) => sum + vol, 0) / volumes.length : 1;
+      const volumeIntensity = medianVolume > 0 ? avgVolume / medianVolume : 1;
+
+      let state: MarketState = 'WAIT';
+      if (volatility >= 5 || avgAbsChange >= 6) {
+        state = 'VOLATILE';
+      } else if (volumeIntensity >= 1.35 && avgAbsChange >= 2.5 && avgScore >= 62) {
+        state = 'VERY_ACTIVE';
+      } else if (avgScore >= 70 && volatility >= 1 && volatility <= 4 && volumeIntensity >= 1.1) {
+        state = 'IDEAL_TRADING';
+      } else if (volatility <= 1.2 && avgAbsChange <= 1.2 && volumeIntensity < 1.05) {
+        state = 'CALM';
+      }
+
+      return {
+        state,
+        avgAbsChange,
+        volatility,
+        volumeIntensity,
+      };
+  }, [displayMarketData]);
+
   const displayData = useMemo(() => {
+      const orderIndex = new Map(marketOrder.map((symbol, index) => [symbol, index]));
       return displayMarketData.filter(item => {
           const isFav = favorites.includes(item.symbol);
           if (isFav) return true;
@@ -632,13 +690,11 @@ export default function App() {
           if (filter === 'BEAR') return item.bias.includes('SELL');
           return false;
       }).sort((a, b) => {
-          const aFav = favorites.includes(a.symbol);
-          const bFav = favorites.includes(b.symbol);
-          if (aFav && !bFav) return -1;
-          if (!aFav && bFav) return 1;
-          return b.score - a.score;
+          const aOrder = orderIndex.get(a.symbol) ?? Number.MAX_SAFE_INTEGER;
+          const bOrder = orderIndex.get(b.symbol) ?? Number.MAX_SAFE_INTEGER;
+          return aOrder - bOrder;
       });
-  }, [displayMarketData, favorites, filter]);
+  }, [displayMarketData, favorites, filter, marketOrder]);
 
   return (
     <div className="min-h-screen pb-safe transition-colors duration-300">
@@ -667,6 +723,30 @@ export default function App() {
                <FilterButton label={t.FILTER_BULL} active={filter === 'BULL'} type="bull" onClick={() => handleFilterChange('BULL')} />
                <FilterButton label={t.FILTER_BEAR} active={filter === 'BEAR'} type="bear" onClick={() => handleFilterChange('BEAR')} />
            </div>
+           {marketStatusSummary && (
+            <div className="mt-3 p-2 border-2 border-black/20 dark:border-white/20 rounded-lg bg-street-cardLight dark:bg-street-cardDark">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">{t.MARKET_STATUS}</span>
+                <span className={`text-[10px] px-2 py-1 rounded-full border font-extrabold uppercase tracking-wide ${MARKET_STATE_STYLES[marketStatusSummary.state]}`}>
+                  {t[`MARKET_STATE_${marketStatusSummary.state}` as keyof typeof t]}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-[10px] font-bold uppercase">
+                <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
+                  <div className="text-gray-500 dark:text-gray-400">{t.MARKET_MOVE}</div>
+                  <div className="text-gray-800 dark:text-gray-100">{marketStatusSummary.avgAbsChange.toFixed(2)}%</div>
+                </div>
+                <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
+                  <div className="text-gray-500 dark:text-gray-400">{t.MARKET_VOLATILITY}</div>
+                  <div className="text-gray-800 dark:text-gray-100">{marketStatusSummary.volatility.toFixed(2)}</div>
+                </div>
+                <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
+                  <div className="text-gray-500 dark:text-gray-400">{t.MARKET_VOLUME}</div>
+                  <div className="text-gray-800 dark:text-gray-100">x{marketStatusSummary.volumeIntensity.toFixed(2)}</div>
+                </div>
+              </div>
+            </div>
+           )}
            <div className="mt-3 grid grid-cols-2 gap-2">
               <div className="flex items-center justify-between p-2 border-2 border-street-purple/50 bg-street-purple/10 rounded-lg">
                   <div>
