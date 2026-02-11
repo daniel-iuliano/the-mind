@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchCandles, fetchOpenInterest, fetchOrderBookImbalance, fetchTop30Markets, fetchTicker, getExchangeAppUrl, getExchangeUrl } from './services/coinex';
-import { analyzeCandles, calculateOrderBlockLevels, calculateSupportResistance } from './services/indicators';
+import { analyzeCandles, calculateEMA, calculateOrderBlockLevels, calculateSupportResistance } from './services/indicators';
 import { scoreMarket } from './services/analyzer';
 import { generateAIAnalysis } from './services/geminiService';
 import { generatePrediction } from './services/predictor';
@@ -597,10 +597,13 @@ export default function App() {
     try {
         const candles = await fetchCandles(symbol, tf);
         if (!candles || candles.length < 50) return;
+        const closes = candles.map((c) => c.close);
+        const ema20Arr = calculateEMA(closes, 20);
+        const ema50Arr = calculateEMA(closes, 50);
         const chartWithIndicators = candles.map((c, i) => ({
             ...c,
-            ema20: i > 20 ? analyzeCandles(candles.slice(0, i+1)).ema20 : undefined,
-            ema50: i > 50 ? analyzeCandles(candles.slice(0, i+1)).ema50 : undefined,
+            ema20: i >= 19 ? ema20Arr[i] : undefined,
+            ema50: i >= 49 ? ema50Arr[i] : undefined,
         })).slice(-80); 
         setChartData(chartWithIndicators);
         setSrLevels(calculateSupportResistance(candles));

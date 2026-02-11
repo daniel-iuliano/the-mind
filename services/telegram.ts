@@ -115,14 +115,22 @@ export const shouldSendAlert = (
   // If "High Score" event is enabled, strictly check score
   if (config.events.highScore && analysis.score < threshold) return false;
 
-  // 4. Specific Event Logic (Overrides score if critical?)
-  // For simplicity, we require the score to meet threshold AND specific events if checked
-  if (config.events.volumeSpike) {
-     const hasVolumeSpike = analysis.reasons.some(r => r.includes("VOL"));
-     if (!hasVolumeSpike && analysis.score < threshold) return false;
-  }
+  // 4. Typed event logic
+  const events = analysis.events ?? {
+    volumeSpike: false,
+    trendBreak: false,
+    highScore: analysis.score >= threshold,
+    liquidityContradiction: false,
+  };
 
-  // Basic Score Check if no specific event overrides
+  if (events.liquidityContradiction) return false;
+
+  const eventChecks: boolean[] = [];
+  if (config.events.highScore) eventChecks.push(events.highScore);
+  if (config.events.volumeSpike) eventChecks.push(events.volumeSpike);
+  if (config.events.trendBreak) eventChecks.push(events.trendBreak);
+
+  if (eventChecks.length > 0 && !eventChecks.some(Boolean)) return false;
   if (analysis.score < threshold) return false;
 
   return true;
