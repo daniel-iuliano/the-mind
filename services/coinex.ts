@@ -91,6 +91,40 @@ export const fetchTicker = async (symbol: string): Promise<{ last: number, vol: 
     }
 }
 
+
+
+export const fetchOrderBookImbalance = async (symbol: string): Promise<number | null> => {
+  const proxiedUrl = buildProxyUrl("/market/depth", { market: symbol, merge: 0, limit: 20 });
+
+  try {
+    const response = await fetch(proxiedUrl);
+    const json = await response.json();
+    if (json.code !== 0 || !json.data) return null;
+
+    const bids = Array.isArray(json.data.bids) ? json.data.bids : [];
+    const asks = Array.isArray(json.data.asks) ? json.data.asks : [];
+
+    const bidPressure = bids.reduce((sum: number, lvl: any[]) => {
+      const price = parseFloat(lvl?.[0] ?? 0);
+      const amount = parseFloat(lvl?.[1] ?? 0);
+      return sum + (Number.isFinite(price) && Number.isFinite(amount) ? price * amount : 0);
+    }, 0);
+
+    const askPressure = asks.reduce((sum: number, lvl: any[]) => {
+      const price = parseFloat(lvl?.[0] ?? 0);
+      const amount = parseFloat(lvl?.[1] ?? 0);
+      return sum + (Number.isFinite(price) && Number.isFinite(amount) ? price * amount : 0);
+    }, 0);
+
+    const total = bidPressure + askPressure;
+    if (total <= 0) return null;
+
+    return (bidPressure - askPressure) / total;
+  } catch {
+    return null;
+  }
+};
+
 export const fetchCandles = async (symbol: string, timeframe: Timeframe): Promise<OHLCV[]> => {
   // Construct the URL for CoinEx Public API
   // Added limit=100 to ensure we have enough data for indicators but not too much to overload

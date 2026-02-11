@@ -122,21 +122,14 @@ export const generatePrediction = (
 ): PredictionResult => {
   const currentPrice = analysis.price;
   const atr = analysis.indicators.atr;
-  const isBuy = analysis.bias.includes('BUY');
-  const isSell = analysis.bias.includes('SELL');
-
   let predictionBias: 'ALCISTA' | 'BAJISTA' | 'NEUTRAL' = 'NEUTRAL';
-  if (isBuy) predictionBias = 'ALCISTA';
-  else if (isSell) predictionBias = 'BAJISTA';
+  if (analysis.marketCondition === 'BULLISH') predictionBias = 'ALCISTA';
+  else if (analysis.marketCondition === 'BEARISH') predictionBias = 'BAJISTA';
 
   const regime = detectMarketRegime(analysis);
 
   // --- Probability Calculation (with regime weighting and statistical confidence) ---
-  const directionalScore = predictionBias === 'ALCISTA'
-    ? analysis.score
-    : predictionBias === 'BAJISTA'
-      ? 100 - analysis.score
-      : 50;
+  const directionalScore = predictionBias === 'NEUTRAL' ? 50 : analysis.score;
   const normalizedSignal = clamp((directionalScore - 50) / 50, 0, 1);
   const trendGap = Math.abs(analysis.indicators.ema20 - analysis.indicators.ema50) / Math.max(currentPrice, 1);
   const momentumStrength = Math.abs(analysis.indicators.macd.histogram) / Math.max(currentPrice * 0.01, 1e-9);

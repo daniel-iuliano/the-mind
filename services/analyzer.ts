@@ -1,190 +1,176 @@
 import { IndicatorValues, MarketAnalysis, SignalBias } from "../types";
-import { SCORING } from "../constants";
 
-export const scoreMarket = (symbol: string, price: number, indicators: IndicatorValues, volume: number, prevVolume: number, change24h: number): MarketAnalysis => {
-  let score = 50; // Neutral start
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+interface PredictiveContext {
+  symbol: string;
+  price: number;
+  indicators: IndicatorValues;
+  volume: number;
+  prevVolume: number;
+  change24h: number;
+  orderBookImbalance?: number | null;
+}
+
+const calculateForwardScores = (ctx: PredictiveContext) => {
+  const { price, indicators, volume, prevVolume, change24h, orderBookImbalance } = ctx;
+
+  let bull = 0;
+  let bear = 0;
   const reasons: string[] = [];
+
+  const volumeRatio = prevVolume > 0 ? volume / prevVolume : 1;
+  const atrPct = price > 0 ? indicators.atr / price : 0;
+  const trendSlope = price > 0 ? (indicators.ema20 - indicators.ema50) / price : 0;
+  const macroSlope = price > 0 ? (indicators.ema50 - indicators.ema200) / price : 0;
+  const momentum = indicators.macd.histogram;
+  const bbRange = Math.max(indicators.bb.upper - indicators.bb.lower, price * 0.0025);
+  const bbPosition = clamp((price - indicators.bb.lower) / bbRange, 0, 1);
+  const stochCrossUp = indicators.stochRsi.k > indicators.stochRsi.d;
+  const stochCrossDown = indicators.stochRsi.k < indicators.stochRsi.d;
+
+  // Trend continuation potential
+  if (trendSlope > 0.0025 && macroSlope > 0.004) {
+    bull += 20;
+    reasons.push("FORWARD_TREND_CONTINUATION_BULL");
+  }
+  if (trendSlope < -0.0025 && macroSlope < -0.004) {
+    bear += 20;
+    reasons.push("FORWARD_TREND_CONTINUATION_BEAR");
+  }
+
+  // Momentum inflection (leading turn)
+  if (momentum > 0 && stochCrossUp && indicators.rsi >= 40 && indicators.rsi <= 62) {
+    bull += 15;
+    reasons.push("FORWARD_MOMENTUM_BUILD_BULL");
+  }
+  if (momentum < 0 && stochCrossDown && indicators.rsi <= 60 && indicators.rsi >= 38) {
+    bear += 15;
+    reasons.push("FORWARD_MOMENTUM_BUILD_BEAR");
+  }
+
+  // Exhaustion-reversal setup (avoid chasing already-extended moves)
+  if (change24h <= -5 && indicators.rsi < 35 && stochCrossUp && bbPosition < 0.2) {
+    bull += 18;
+    reasons.push("FORWARD_REVERSAL_LONG_SETUP");
+  }
+  if (change24h >= 5 && indicators.rsi > 65 && stochCrossDown && bbPosition > 0.8) {
+    bear += 18;
+    reasons.push("FORWARD_REVERSAL_SHORT_SETUP");
+  }
+
+  // Volume behavior as confirmation of what is likely next
+  if (volumeRatio > 1.25) {
+    if (momentum > 0 || trendSlope > 0) {
+      bull += 10;
+      reasons.push("FORWARD_VOLUME_SUPPORT_BULL");
+    }
+    if (momentum < 0 || trendSlope < 0) {
+      bear += 10;
+      reasons.push("FORWARD_VOLUME_SUPPORT_BEAR");
+    }
+  } else if (volumeRatio < 0.85 && atrPct > 0.018) {
+    bull += 5;
+    bear += 5;
+    reasons.push("FORWARD_LOW_CONVICTION");
+  }
+
+  // Order book backlog / pressure proxy
+  if (typeof orderBookImbalance === 'number') {
+    if (orderBookImbalance > 0.12) {
+      bull += 12;
+      reasons.push("ORDERBOOK_BID_DOMINANCE");
+    } else if (orderBookImbalance < -0.12) {
+      bear += 12;
+      reasons.push("ORDERBOOK_ASK_DOMINANCE");
+    } else {
+      reasons.push("ORDERBOOK_BALANCED");
+    }
+  }
+
+  // Volatility regime quality weighting
+  if (atrPct < 0.006) {
+    bull -= 4;
+    bear -= 4;
+    reasons.push("FORWARD_RANGE_COMPRESSION");
+  }
+  if (atrPct > 0.03) {
+    bull -= 3;
+    bear -= 3;
+    reasons.push("FORWARD_HIGH_NOISE");
+  }
+
+  return {
+    bullishStrength: clamp(Math.round(bull), 0, 100),
+    bearishStrength: clamp(Math.round(bear), 0, 100),
+    reasons,
+    volumeRatio,
+  };
+};
+
+export const scoreMarket = (
+  symbol: string,
+  price: number,
+  indicators: IndicatorValues,
+  volume: number,
+  prevVolume: number,
+  change24h: number,
+  orderBookImbalance?: number | null,
+): MarketAnalysis => {
+  const { bullishStrength, bearishStrength, reasons, volumeRatio } = calculateForwardScores({
+    symbol,
+    price,
+    indicators,
+    volume,
+    prevVolume,
+    change24h,
+    orderBookImbalance,
+  });
+
+  const conditionDelta = bullishStrength - bearishStrength;
+  let marketCondition: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+  if (conditionDelta >= 8) marketCondition = 'BULLISH';
+  else if (conditionDelta <= -8) marketCondition = 'BEARISH';
+
+  const conditionStrength = marketCondition === 'BULLISH'
+    ? bullishStrength
+    : marketCondition === 'BEARISH'
+      ? bearishStrength
+      : Math.max(bullishStrength, bearishStrength);
+
   let bias = SignalBias.NEUTRAL;
-  let bullSignals = 0;
-  let bearSignals = 0;
-
-  const addBullSignal = (weight: number, reason: string) => {
-    score += weight;
-    reasons.push(reason);
-    bullSignals += 1;
-  };
-
-  const addBearSignal = (weight: number, reason: string) => {
-    score -= weight;
-    reasons.push(reason);
-    bearSignals += 1;
-  };
-
-  // 1. RSI Analysis (Mean Reversion / Momentum)
-  if (indicators.rsi < 30) {
-    addBullSignal(SCORING.RSI_WEIGHT, "RSI_OVERSOLD");
-  } else if (indicators.rsi > 70) {
-    addBearSignal(SCORING.RSI_WEIGHT, "RSI_OVERBOUGHT");
+  if (marketCondition === 'BULLISH') {
+    if (conditionStrength >= 75) bias = SignalBias.STRONG_BUY;
+    else if (conditionStrength >= 55) bias = SignalBias.BUY;
+  } else if (marketCondition === 'BEARISH') {
+    if (conditionStrength >= 75) bias = SignalBias.STRONG_SELL;
+    else if (conditionStrength >= 55) bias = SignalBias.SELL;
   }
 
-  // 2. Stochastic RSI (Confirmation)
-  if (indicators.stochRsi.k < 20 && indicators.stochRsi.d < 20 && indicators.stochRsi.k > indicators.stochRsi.d) {
-    addBullSignal(10, "STOCH_BULL_CROSS");
-  } else if (indicators.stochRsi.k > 80 && indicators.stochRsi.d > 80 && indicators.stochRsi.k < indicators.stochRsi.d) {
-    addBearSignal(10, "STOCH_BEAR_CROSS");
-  }
+  const earlyLongScore = clamp(Math.round(
+    bullishStrength * 0.55 +
+    (indicators.stochRsi.k > indicators.stochRsi.d ? 18 : 0) +
+    (indicators.rsi >= 42 && indicators.rsi <= 58 ? 12 : 0) +
+    (volumeRatio > 1.2 ? 10 : 0)
+  ), 0, 100);
 
-  // 3. Trend Analysis (EMA)
-  const isBullishTrend = price > indicators.ema50 && indicators.ema50 > indicators.ema200;
-  const isBearishTrend = price < indicators.ema50 && indicators.ema50 < indicators.ema200;
+  const earlyShortScore = clamp(Math.round(
+    bearishStrength * 0.55 +
+    (indicators.stochRsi.k < indicators.stochRsi.d ? 18 : 0) +
+    (indicators.rsi >= 42 && indicators.rsi <= 58 ? 12 : 0) +
+    (volumeRatio > 1.2 ? 10 : 0)
+  ), 0, 100);
 
-  if (isBullishTrend) {
-    addBullSignal(SCORING.TREND_WEIGHT, "EMA_ALIGN_BULL");
-  } else if (isBearishTrend) {
-    addBearSignal(SCORING.TREND_WEIGHT, "EMA_ALIGN_BEAR");
-  }
-
-  // 4. MACD Momentum
-  const histogram = indicators.macd.histogram;
-  if (histogram > 0 && histogram > indicators.macd.signal) {
-     addBullSignal(10, "MACD_HIST_BULL");
-  } else if (histogram < 0 && histogram < indicators.macd.signal) {
-     addBearSignal(10, "MACD_HIST_BEAR");
-  }
-
-  // 5. Bollinger Bands (Dynamic S/R)
-  if (price <= indicators.bb.lower) {
-    addBullSignal(15, "BB_BOUNCE_LOW");
-  } else if (price >= indicators.bb.upper) {
-    addBearSignal(15, "BB_REJECT_HIGH");
-  }
-
-  // 6. Price Momentum (24h change)
-  const bullishMomentum = change24h > 2;
-  const bearishMomentum = change24h < -2;
-  if (bullishMomentum) {
-    addBullSignal(5, "PRICE_MOMENTUM_BULL");
-  } else if (bearishMomentum) {
-    addBearSignal(5, "PRICE_MOMENTUM_BEAR");
-  }
-
-  // 7. Trap Risk (Trend vs Momentum)
-  if (isBullishTrend && indicators.rsi > 70 && histogram < 0) {
-    addBearSignal(15, "BULL_TRAP_RISK");
-  } else if (isBearishTrend && indicators.rsi < 30 && histogram > 0) {
-    addBullSignal(15, "BEAR_TRAP_RISK");
-  }
-
-  // 8. Volatility Filter (ATR)
-  // If ATR is extremely low relative to price, volatility is dead (squeeze)
-  const volatilityRatio = indicators.atr / price;
-  if (volatilityRatio < 0.005) { // < 0.5% movement avg
-      reasons.push("LOW_VOLATILITY");
-      // Reduce strong signals in low vol environments as they are often fakeouts
-      if (score > 70) score -= 10; 
-      if (score < 30) score += 10;
-  }
-
-  // 9. Volume Confirmation
-  if (volume > prevVolume * 1.5) {
-      if (isBullishTrend || bullishMomentum) {
-          addBullSignal(5, "VOL_CONFIRMATION");
-      } else if (isBearishTrend || bearishMomentum) {
-          addBearSignal(5, "VOL_PRESSURE");
-      } else {
-          reasons.push("VOL_SPIKE_UNCERTAIN");
-      }
-  }
-
-  // 10. Indicator Consensus
-  const totalSignals = bullSignals + bearSignals;
-  if (totalSignals >= 4 && bullSignals > 0 && bearSignals > 0) {
-    const conflictPenalty = 10;
-    score = score > 50 ? score - conflictPenalty : score + conflictPenalty;
-    reasons.push("SIGNAL_CONFLICT");
-  } else if (bullSignals >= 3 && bearSignals === 0) {
-    addBullSignal(5, "SIGNAL_STACK_BULL");
-  } else if (bearSignals >= 3 && bullSignals === 0) {
-    addBearSignal(5, "SIGNAL_STACK_BEAR");
-  }
-
-  // Normalize Score 0-100
-  score = Math.max(0, Math.min(100, score));
-
-  // Determine Bias
-  if (score >= SCORING.THRESHOLD_STRONG) bias = SignalBias.STRONG_BUY;
-  else if (score >= 60) bias = SignalBias.BUY;
-  else if (score <= 100 - SCORING.THRESHOLD_STRONG) bias = SignalBias.STRONG_SELL;
-  else if (score <= 40) bias = SignalBias.SELL;
-
-  // Early Signal Detection (Possible Shorts/Longs)
-  const earlyLongReasons: string[] = [];
-  const earlyShortReasons: string[] = [];
-  let earlyLongScore = 0;
-  let earlyShortScore = 0;
-
-  if (price > indicators.ema20 && indicators.ema20 > indicators.ema50) {
-    earlyLongScore += 20;
-    earlyLongReasons.push("EARLY_EMA_BULL");
-  } else if (price < indicators.ema20 && indicators.ema20 < indicators.ema50) {
-    earlyShortScore += 20;
-    earlyShortReasons.push("EARLY_EMA_BEAR");
-  }
-
-  if (indicators.macd.macd > indicators.macd.signal && indicators.macd.histogram > 0) {
-    earlyLongScore += 20;
-    earlyLongReasons.push("EARLY_MACD_BULL");
-  } else if (indicators.macd.macd < indicators.macd.signal && indicators.macd.histogram < 0) {
-    earlyShortScore += 20;
-    earlyShortReasons.push("EARLY_MACD_BEAR");
-  }
-
-  if (indicators.stochRsi.k > indicators.stochRsi.d && indicators.stochRsi.k < 30) {
-    earlyLongScore += 15;
-    earlyLongReasons.push("EARLY_STOCH_BULL");
-  } else if (indicators.stochRsi.k < indicators.stochRsi.d && indicators.stochRsi.k > 70) {
-    earlyShortScore += 15;
-    earlyShortReasons.push("EARLY_STOCH_BEAR");
-  }
-
-  if (indicators.rsi > 52 && indicators.rsi < 60) {
-    earlyLongScore += 10;
-    earlyLongReasons.push("EARLY_RSI_BULL");
-  } else if (indicators.rsi < 48 && indicators.rsi > 40) {
-    earlyShortScore += 10;
-    earlyShortReasons.push("EARLY_RSI_BEAR");
-  }
-
-  if (price > indicators.bb.middle) {
-    earlyLongScore += 10;
-    earlyLongReasons.push("EARLY_BB_BULL");
-  } else if (price < indicators.bb.middle) {
-    earlyShortScore += 10;
-    earlyShortReasons.push("EARLY_BB_BEAR");
-  }
-
-  const maxEarlyScore = Math.max(earlyLongScore, earlyShortScore);
-  const minEarlyScore = 35;
   let earlySide: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
   let earlyReasons: string[] = [];
-
-  if (earlyLongScore >= minEarlyScore && earlyLongScore >= earlyShortScore + 10) {
+  if (earlyLongScore >= 45 && earlyLongScore >= earlyShortScore + 8) {
     earlySide = 'LONG';
-    earlyReasons = earlyLongReasons;
-  } else if (earlyShortScore >= minEarlyScore && earlyShortScore >= earlyLongScore + 10) {
+    earlyReasons = reasons.filter((r) => r.includes('BULL') || r.includes('LONG')).slice(0, 3);
+  } else if (earlyShortScore >= 45 && earlyShortScore >= earlyLongScore + 8) {
     earlySide = 'SHORT';
-    earlyReasons = earlyShortReasons;
-  } else if (maxEarlyScore >= minEarlyScore) {
-    earlyReasons = earlyLongScore >= earlyShortScore ? earlyLongReasons : earlyShortReasons;
-    earlyReasons.push("EARLY_SIGNAL_CONFLICT");
-  }
-
-  let earlyConfidence = Math.min(95, Math.round((maxEarlyScore / 75) * 100));
-  if (volatilityRatio < 0.005 && earlyConfidence > 0) {
-    earlyConfidence = Math.max(0, earlyConfidence - 10);
-    if (earlySide !== 'NEUTRAL') {
-      earlyReasons.push("EARLY_LOW_VOL");
-    }
+    earlyReasons = reasons.filter((r) => r.includes('BEAR') || r.includes('SHORT')).slice(0, 3);
+  } else {
+    earlyReasons = reasons.slice(0, 3);
   }
 
   return {
@@ -193,14 +179,16 @@ export const scoreMarket = (symbol: string, price: number, indicators: Indicator
     change24h,
     volume24h: volume,
     indicators,
-    score,
+    marketCondition,
+    conditionStrength,
+    score: conditionStrength,
     bias,
     reasons,
     earlySignal: {
       side: earlySide,
-      confidence: earlyConfidence,
-      reasons: earlyReasons.slice(0, 3)
+      confidence: Math.max(earlyLongScore, earlyShortScore),
+      reasons: earlyReasons,
     },
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
 };
