@@ -17,7 +17,6 @@ import { formatPrice } from './utils/formatters';
 const MoonIcon = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>;
 const SunIcon = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>;
 const BellIcon = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>;
-const PredictIcon = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>;
 const CloseIcon = () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>;
 const StarIcon = ({ filled }: { filled: boolean }) => (
   <svg className={`w-5 h-5 transition-colors ${filled ? 'text-yellow-400 fill-yellow-400' : 'text-gray-400 hover:text-yellow-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -123,19 +122,6 @@ const StreetBadge = ({ text, type }: { text: string, type: 'bull' | 'bear' | 'ne
   };
   return <span className={`${colors[type]} px-2 py-0.5 text-[10px] font-bold uppercase border-2 shadow-brutal-sm transform -rotate-1`}>{text}</span>;
 };
-
-const FilterButton = ({ label, active, type, onClick }: any) => {
-  const baseClass = "px-3 py-1.5 rounded-lg text-[10px] font-bold border-2 transition-all active:scale-95 flex-1 sm:flex-none text-center";
-  let activeClass = "";
-  if (type === 'bull') {
-      activeClass = active ? "bg-street-acid text-black border-black shadow-brutal-sm" : "border-street-acid/50 text-street-acid/80 hover:border-street-acid hover:text-street-acid bg-transparent";
-  } else if (type === 'bear') {
-      activeClass = active ? "bg-street-pink text-white border-black shadow-brutal-sm" : "border-street-pink/50 text-street-pink/80 hover:border-street-pink hover:text-street-pink bg-transparent";
-  } else {
-      activeClass = active ? "bg-black text-white dark:bg-white dark:text-black border-black dark:border-white shadow-brutal-sm" : "border-gray-400 text-gray-500 hover:border-gray-800 dark:hover:border-gray-300 dark:hover:text-gray-300 bg-transparent";
-  }
-  return <button onClick={onClick} className={`${baseClass} ${activeClass}`}>{label}</button>;
-}
 
 const MarketCard = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }: { 
     data: MarketAnalysis, 
@@ -403,18 +389,6 @@ const SettingsContent = ({ config, setConfig, isOppositeMode, onToggleOppositeMo
                     <div className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-black border border-white transition-transform ${config.enabled ? 'translate-x-6' : 'translate-x-0'}`} />
                 </button>
             </div>
-            <div className="p-4 border-2 border-street-purple/50 bg-street-purple/10 rounded-xl relative overflow-hidden">
-                <div className="absolute -right-4 -top-4 text-6xl opacity-20">🔮</div>
-                <div className="flex items-center justify-between relative z-10">
-                    <div>
-                        <span className="font-bold text-sm uppercase text-street-purple block">{t.PREDICT_MODE}</span>
-                        <span className="text-xs font-medium text-gray-600 dark:text-gray-400 max-w-[150px] block leading-tight mt-1">{t.PREDICT_DESC}</span>
-                    </div>
-                    <button onClick={() => setConfig({...config, predictMode: !config.predictMode})} className={`w-14 h-8 rounded-full border-2 border-black dark:border-white transition-colors relative ${config.predictMode ? 'bg-street-purple' : 'bg-gray-400'}`}>
-                        <div className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-black border border-white transition-transform ${config.predictMode ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
-                </div>
-            </div>
             <div className="p-4 border-2 border-street-pink/50 bg-street-pink/10 rounded-xl relative overflow-hidden">
                 <div className="absolute -right-4 -top-4 text-6xl opacity-20">🌓</div>
                 <div className="flex items-center justify-between relative z-10">
@@ -543,6 +517,7 @@ export default function App() {
     liquidity: true,
     highVolume: true,
   });
+  const [heatmapOverlayFilter, setHeatmapOverlayFilter] = useState<'all' | keyof OrderBlockVisibility>('all');
   const [detailViewTab, setDetailViewTab] = useState<DetailViewTab>('chart');
   const [srLevels, setSrLevels] = useState<SupportResistanceLevel[]>([]);
   const [orderBlockLevels, setOrderBlockLevels] = useState<OrderBlockLevel[]>([]);
@@ -707,7 +682,6 @@ export default function App() {
   const toggleSettings = () => withLoader(() => setIsSettingsOpen(!isSettingsOpen));
   const toggleTheme = () => withLoader(() => setTheme(theme === 'dark' ? 'light' : 'dark'));
   const toggleScanning = () => withLoader(() => setIsScanning(!isScanning));
-  const togglePredictMode = () => setAlertConfig((prev) => ({ ...prev, predictMode: !prev.predictMode }));
   
   const handleOpenPositionFlow = () => {
       if (!coinexKeys) setIsKeyModalOpen(true); else setIsPositionConfirmOpen(true);
@@ -822,9 +796,27 @@ export default function App() {
       .slice(0, 3)
       .map((level) => {
         const distance = currentPrice > 0 ? ((level.price - currentPrice) / currentPrice) * 100 : 0;
+        const side = level.type === 'supply' ? 'SHORT' : 'LONG';
+        const sideLabel = lang === 'ES' ? (side === 'SHORT' ? 'SHORT' : 'LONG') : side;
+        const zoneLabel =
+          lang === 'ES'
+            ? level.type === 'supply'
+              ? 'Zona de oferta'
+              : level.type === 'demand'
+                ? 'Zona de demanda'
+                : level.type === 'liquidity'
+                  ? 'Clúster de liquidez'
+                  : 'Nodo de alto volumen'
+            : level.type === 'supply'
+              ? 'Supply zone'
+              : level.type === 'demand'
+                ? 'Demand zone'
+                : level.type === 'liquidity'
+                  ? 'Liquidity cluster'
+                  : 'High-volume node';
         return {
-          label: level.label,
-          side: level.type === 'supply' ? 'SHORT' : 'LONG',
+          label: zoneLabel,
+          side: sideLabel,
           strength: level.strength,
           distance,
           price: level.price,
@@ -835,8 +827,12 @@ export default function App() {
 
     const contextLine =
       longPressure > shortPressure
-        ? 'Long liquidity pockets are denser, suggesting downside sweeps could attract responsive buying.'
-        : 'Short liquidity bands are denser, suggesting upside sweeps may face aggressive supply response.';
+        ? lang === 'ES'
+          ? 'Los bolsillos de liquidez long son más densos; barridos bajistas podrían activar compras de respuesta.'
+          : 'Long liquidity pockets are denser, suggesting downside sweeps could attract responsive buying.'
+        : lang === 'ES'
+          ? 'Las bandas de liquidez short son más densas; barridos alcistas podrían encontrar oferta agresiva.'
+          : 'Short liquidity bands are denser, suggesting upside sweeps may face aggressive supply response.';
 
     return {
       currentPrice,
@@ -846,7 +842,16 @@ export default function App() {
       imbalanceScore,
       contextLine,
     };
-  }, [chartData, orderBlockLevels]);
+  }, [chartData, lang, orderBlockLevels]);
+
+  useEffect(() => {
+    setOrderBlockVisibility({
+      demand: heatmapOverlayFilter === 'all' || heatmapOverlayFilter === 'demand',
+      supply: heatmapOverlayFilter === 'all' || heatmapOverlayFilter === 'supply',
+      liquidity: heatmapOverlayFilter === 'all' || heatmapOverlayFilter === 'liquidity',
+      highVolume: heatmapOverlayFilter === 'all' || heatmapOverlayFilter === 'highVolume',
+    });
+  }, [heatmapOverlayFilter]);
 
   const marketStatusSummary = useMemo(() => {
       if (displayMarketData.length === 0) return null;
@@ -1029,15 +1034,30 @@ export default function App() {
                   <button onClick={toggleScanning} className={`text-[10px] font-bold px-2 py-2 rounded-lg border-2 border-black dark:border-white shadow-brutal-sm active:shadow-none active:translate-y-1 transition-all ${isScanning ? 'bg-street-acid text-black' : 'bg-street-pink text-white'}`}>{isScanning ? t.LIVE : t.PAUSE}</button>
               </div>
            </div>
-           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 mb-2">
-              {[Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4].map(tf => (
-                 <button key={tf} onClick={() => handleTimeframeChange(tf)} className={`whitespace-nowrap px-4 py-1 rounded-lg text-xs font-bold border-2 border-black dark:border-white transition-all ${activeTimeframe === tf ? 'bg-black text-white dark:bg-white dark:text-black shadow-brutal-sm' : 'bg-transparent text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white'}`}>{tf}</button>
-              ))}
-           </div>
-           <div className="flex gap-2 mt-1">
-               <FilterButton label={t.FILTER_ALL} active={filter === 'ALL'} type="all" onClick={() => handleFilterChange('ALL')} />
-               <FilterButton label={t.FILTER_BULL} active={filter === 'BULL'} type="bull" onClick={() => handleFilterChange('BULL')} />
-               <FilterButton label={t.FILTER_BEAR} active={filter === 'BEAR'} type="bear" onClick={() => handleFilterChange('BEAR')} />
+           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+              <div className="flex gap-2">
+                <select
+                  value={filter}
+                  onChange={(e) => handleFilterChange(e.target.value as 'ALL' | 'BULL' | 'BEAR')}
+                  className="flex-1 bg-transparent border-2 border-black dark:border-white rounded-lg px-3 py-2 text-xs font-bold uppercase"
+                >
+                  <option value="ALL">{t.FILTER_ALL}</option>
+                  <option value="BULL">{t.FILTER_BULL}</option>
+                  <option value="BEAR">{t.FILTER_BEAR}</option>
+                </select>
+                <button onClick={() => setIsOppositeMode(prev => !prev)} className={`px-3 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all whitespace-nowrap ${isOppositeMode ? 'bg-street-pink text-white border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
+                  {t.OPPOSITE_MODE}
+                </button>
+              </div>
+              <select
+                value={activeTimeframe}
+                onChange={(e) => handleTimeframeChange(e.target.value as Timeframe)}
+                className="w-full bg-transparent border-2 border-black dark:border-white rounded-lg px-3 py-2 text-xs font-bold uppercase"
+              >
+                {[Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4].map((tf) => (
+                  <option key={tf} value={tf}>{tf}</option>
+                ))}
+              </select>
            </div>
            {marketStatusSummary && (
             <>
@@ -1099,17 +1119,7 @@ export default function App() {
               </div>
             </>
            )}
-           <div className="mt-3 grid grid-cols-1 gap-2">
-              <div className="flex items-center justify-between p-2 border-2 border-street-pink/50 bg-street-pink/10 rounded-lg">
-                  <div>
-                      <span className="text-[10px] font-bold uppercase text-street-pink block">{t.OPPOSITE_MODE}</span>
-                      <span className="text-[9px] font-medium text-gray-600 dark:text-gray-400">{t.MODE_ALWAYS_ON}</span>
-                  </div>
-                  <button onClick={() => setIsOppositeMode(prev => !prev)} className={`w-12 h-7 rounded-full border-2 border-black dark:border-white transition-colors relative ${isOppositeMode ? 'bg-street-pink' : 'bg-gray-400'}`}>
-                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-black border border-white transition-transform ${isOppositeMode ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-              </div>
-           </div>
+
         </header>
 
         <main className="p-4 pb-20 space-y-2 min-h-screen">
@@ -1140,42 +1150,34 @@ export default function App() {
                   <h2 className="font-extrabold text-xl italic tracking-tighter leading-none">{selectedSymbol}</h2>
                   <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase">{activeTimeframe} • {t.REALTIME}</span>
                </div>
-               <button onClick={handlePredict} disabled={!!loadingMap[selectedSymbol]} className="bg-street-purple text-white border-2 border-black dark:border-white shadow-brutal-sm px-3 py-2 rounded-lg flex items-center gap-1 active:shadow-none active:translate-y-1 transition-all"><PredictIcon /><span className="text-xs font-bold">{t.PREDICT_BTN}</span></button>
+               <button onClick={handlePredict} disabled={!!loadingMap[selectedSymbol]} className="bg-street-purple text-white border-2 border-black dark:border-white shadow-brutal-sm px-3 py-2 rounded-lg text-xs font-bold active:shadow-none active:translate-y-1 transition-all">{t.PREDICT_BTN}</button>
             </div>
             <div className="flex gap-2 px-4 py-2 border-b-2 border-black/10 dark:border-white/10">
-                <button onClick={togglePredictMode} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${alertConfig.predictMode ? 'bg-street-purple text-white border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
-                    {t.PREDICT_MODE}
-                </button>
-                <button onClick={() => setIsOppositeMode(prev => !prev)} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${isOppositeMode ? 'bg-street-pink text-white border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
+                <select
+                  value={chartMode}
+                  onChange={(e) => setChartMode(e.target.value as 'line' | 'candles')}
+                  className="flex-1 bg-transparent border border-black/20 dark:border-white/20 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide"
+                >
+                  <option value="line">{t.LINE}</option>
+                  <option value="candles">{t.CANDLES}</option>
+                </select>
+                <button onClick={() => setIsOppositeMode(prev => !prev)} className={`px-3 py-1.5 text-[10px] font-bold uppercase border rounded-md transition-all whitespace-nowrap ${isOppositeMode ? 'bg-street-pink text-white border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
                     {t.OPPOSITE_MODE}
                 </button>
             </div>
-            <div className="flex gap-1.5 px-4 py-2 border-b border-black/10 dark:border-white/10">
-                <button onClick={() => setChartMode('line')} className={`flex-1 py-1.5 text-[9px] font-semibold uppercase tracking-wide border rounded-md transition-all ${chartMode === 'line' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/15 dark:border-white/20'}`}>
-                    {t.LINE}
-                </button>
-                <button onClick={() => setChartMode('candles')} className={`flex-1 py-1.5 text-[9px] font-semibold uppercase tracking-wide border rounded-md transition-all ${chartMode === 'candles' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/15 dark:border-white/20'}`}>
-                    {t.CANDLES}
-                </button>
-            </div>
             <div className="px-4 py-2 border-b border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
-              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-600 dark:text-gray-300 mb-1.5">Order Block overlays</p>
-              <div className="grid grid-cols-2 gap-1.5">
-                {[
-                  { key: 'demand' as const, label: 'Buy zones (Demand)' },
-                  { key: 'supply' as const, label: 'Sell zones (Supply)' },
-                  { key: 'liquidity' as const, label: 'Liquidity clusters' },
-                  { key: 'highVolume' as const, label: 'High-volume nodes' },
-                ].map((toggle) => (
-                  <button
-                    key={toggle.key}
-                    onClick={() => setOrderBlockVisibility((prev) => ({ ...prev, [toggle.key]: !prev[toggle.key] }))}
-                    className={`px-2 py-1 text-[9px] font-semibold uppercase tracking-wide rounded-md border transition-all ${orderBlockVisibility[toggle.key] ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/15 dark:border-white/20'}`}
-                  >
-                    {toggle.label}
-                  </button>
-                ))}
-              </div>
+              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-600 dark:text-gray-300 mb-1.5">{t.HEATMAP_OVERLAYS}</p>
+              <select
+                value={heatmapOverlayFilter}
+                onChange={(e) => setHeatmapOverlayFilter(e.target.value as 'all' | keyof OrderBlockVisibility)}
+                className="w-full bg-transparent border border-black/20 dark:border-white/20 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide"
+              >
+                <option value="all">{t.HEATMAP_FILTER_ALL}</option>
+                <option value="demand">{t.HEATMAP_FILTER_DEMAND}</option>
+                <option value="supply">{t.HEATMAP_FILTER_SUPPLY}</option>
+                <option value="liquidity">{t.HEATMAP_FILTER_LIQUIDITY}</option>
+                <option value="highVolume">{t.HEATMAP_FILTER_HIGH_VOLUME}</option>
+              </select>
             </div>
             <div className="flex gap-1.5 px-4 py-2 border-b border-black/10 dark:border-white/10 bg-black/[0.015] dark:bg-white/[0.015]">
               <button
@@ -1203,40 +1205,37 @@ export default function App() {
                    </div>
                    <div className="p-4 border-b-2 border-black/10 dark:border-white/10 space-y-3">
                      <div>
-                       <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-gray-700 dark:text-gray-200 mb-1">Heatmap Description</h3>
+                       <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-gray-700 dark:text-gray-200 mb-1">{t.HEATMAP_DESCRIPTION_TITLE}</h3>
                        <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-                         The Order Block Liquidity Map highlights where liquidity is concentrated across the current price ladder.
-                         Red horizontal bands mark potential short-liquidity pools and sell pressure zones, while green bands mark
-                         long-liquidity pools and buy-support zones. Brighter saturation indicates larger concentration and higher
-                         probability of reactive order flow.
+                         {t.HEATMAP_DESCRIPTION_BODY}
                        </p>
                      </div>
                      <div>
-                       <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-gray-700 dark:text-gray-200 mb-1">Structured Analysis</h3>
+                       <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-gray-700 dark:text-gray-200 mb-1">{t.HEATMAP_STRUCTURED_ANALYSIS}</h3>
                        {heatmapInsight ? (
                          <div className="space-y-2 text-xs text-gray-700 dark:text-gray-300">
                            <p>
-                             <span className="font-semibold">Liquidity concentration:</span> Long pressure {heatmapInsight.longPressure.toFixed(2)} vs short pressure {heatmapInsight.shortPressure.toFixed(2)}.
+                             <span className="font-semibold">{t.HEATMAP_LIQUIDITY_CONCENTRATION}</span> {t.HEATMAP_LONG_PRESSURE} {heatmapInsight.longPressure.toFixed(2)} {t.HEATMAP_VS} {t.HEATMAP_SHORT_PRESSURE} {heatmapInsight.shortPressure.toFixed(2)}.
                            </p>
                            <p>
-                             <span className="font-semibold">Imbalance clusters:</span> Current skew is {(heatmapInsight.imbalanceScore * 100).toFixed(0)}%, indicating {heatmapInsight.imbalanceScore > 0.35 ? 'a directional liquidity tilt' : 'a relatively balanced liquidity field'}.
+                             <span className="font-semibold">{t.HEATMAP_IMBALANCE_CLUSTERS}</span> {t.HEATMAP_CURRENT_SKEW} {(heatmapInsight.imbalanceScore * 100).toFixed(0)}%, {heatmapInsight.imbalanceScore > 0.35 ? t.HEATMAP_DIRECTIONAL_TILT : t.HEATMAP_BALANCED_FIELD}.
                            </p>
                            <div>
-                             <p className="font-semibold mb-1">Active pressure zones near {formatPrice(heatmapInsight.currentPrice)}:</p>
+                             <p className="font-semibold mb-1">{t.HEATMAP_ACTIVE_ZONES} {formatPrice(heatmapInsight.currentPrice)}:</p>
                              <ul className="space-y-1 list-disc pl-4">
                                {heatmapInsight.strongestClusters.map((cluster) => (
                                  <li key={`${cluster.label}-${cluster.price}`}>
-                                   {cluster.side} cluster at {formatPrice(cluster.price)} ({cluster.distance >= 0 ? '+' : ''}{cluster.distance.toFixed(2)}%) • strength {cluster.strength.toFixed(2)}.
+                                   {cluster.side} - {cluster.label} {t.HEATMAP_AT} {formatPrice(cluster.price)} ({cluster.distance >= 0 ? '+' : ''}{cluster.distance.toFixed(2)}%) • {t.HEATMAP_STRENGTH} {cluster.strength.toFixed(2)}.
                                  </li>
                                ))}
                              </ul>
                            </div>
                            <p>
-                             <span className="font-semibold">Contextual insight:</span> {heatmapInsight.contextLine}
+                             <span className="font-semibold">{t.HEATMAP_CONTEXTUAL_INSIGHT}</span> {heatmapInsight.contextLine}
                            </p>
                          </div>
                        ) : (
-                         <p className="text-xs text-gray-600 dark:text-gray-400">Insufficient order-block data to build a structured heatmap analysis.</p>
+                         <p className="text-xs text-gray-600 dark:text-gray-400">{t.HEATMAP_INSUFFICIENT_DATA}</p>
                        )}
                      </div>
                    </div>
