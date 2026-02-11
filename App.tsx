@@ -39,6 +39,8 @@ type MarketRegimeState =
   | 'BALANCED_ROTATION'
   | 'ACCUMULATION_PHASE';
 
+type DetailViewTab = 'chart' | 'heatmap';
+
 const MARKET_STATE_STYLES: Record<MarketState, string> = {
   VERY_ACTIVE: 'text-orange-700 dark:text-orange-300 border-orange-500/40 bg-orange-500/10',
   VOLATILE: 'text-pink-700 dark:text-pink-300 border-pink-500/40 bg-pink-500/10',
@@ -541,6 +543,7 @@ export default function App() {
     liquidity: true,
     highVolume: true,
   });
+  const [detailViewTab, setDetailViewTab] = useState<DetailViewTab>('chart');
   const [srLevels, setSrLevels] = useState<SupportResistanceLevel[]>([]);
   const [orderBlockLevels, setOrderBlockLevels] = useState<OrderBlockLevel[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
@@ -795,6 +798,55 @@ export default function App() {
   }, [marketData, isOppositeMode]);
 
   const activeMarket = displayMarketData.find(m => m.symbol === selectedSymbol);
+
+  useEffect(() => {
+    setDetailViewTab('chart');
+  }, [selectedSymbol]);
+
+  const heatmapInsight = useMemo(() => {
+    if (!chartData.length || !orderBlockLevels.length) return null;
+
+    const relevantLevels = orderBlockLevels.filter((level) =>
+      ['demand', 'supply', 'liquidity', 'highVolume'].includes(level.type),
+    );
+    if (!relevantLevels.length) return null;
+
+    const currentPrice = chartData.at(-1)?.close ?? 0;
+    const longLevels = relevantLevels.filter((level) => level.type !== 'supply');
+    const shortLevels = relevantLevels.filter((level) => level.type === 'supply');
+    const longPressure = longLevels.reduce((sum, level) => sum + level.strength, 0);
+    const shortPressure = shortLevels.reduce((sum, level) => sum + level.strength, 0);
+
+    const strongestClusters = [...relevantLevels]
+      .sort((a, b) => b.strength - a.strength)
+      .slice(0, 3)
+      .map((level) => {
+        const distance = currentPrice > 0 ? ((level.price - currentPrice) / currentPrice) * 100 : 0;
+        return {
+          label: level.label,
+          side: level.type === 'supply' ? 'SHORT' : 'LONG',
+          strength: level.strength,
+          distance,
+          price: level.price,
+        };
+      });
+
+    const imbalanceScore = Math.abs(longPressure - shortPressure) / Math.max(longPressure + shortPressure, 1);
+
+    const contextLine =
+      longPressure > shortPressure
+        ? 'Long liquidity pockets are denser, suggesting downside sweeps could attract responsive buying.'
+        : 'Short liquidity bands are denser, suggesting upside sweeps may face aggressive supply response.';
+
+    return {
+      currentPrice,
+      longPressure,
+      shortPressure,
+      strongestClusters,
+      imbalanceScore,
+      contextLine,
+    };
+  }, [chartData, orderBlockLevels]);
 
   const marketStatusSummary = useMemo(() => {
       if (displayMarketData.length === 0) return null;
@@ -1098,17 +1150,17 @@ export default function App() {
                     {t.OPPOSITE_MODE}
                 </button>
             </div>
-            <div className="flex gap-2 px-4 py-2 border-b-2 border-black/10 dark:border-white/10">
-                <button onClick={() => setChartMode('line')} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${chartMode === 'line' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
+            <div className="flex gap-1.5 px-4 py-2 border-b border-black/10 dark:border-white/10">
+                <button onClick={() => setChartMode('line')} className={`flex-1 py-1.5 text-[9px] font-semibold uppercase tracking-wide border rounded-md transition-all ${chartMode === 'line' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/15 dark:border-white/20'}`}>
                     {t.LINE}
                 </button>
-                <button onClick={() => setChartMode('candles')} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${chartMode === 'candles' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
+                <button onClick={() => setChartMode('candles')} className={`flex-1 py-1.5 text-[9px] font-semibold uppercase tracking-wide border rounded-md transition-all ${chartMode === 'candles' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/15 dark:border-white/20'}`}>
                     {t.CANDLES}
                 </button>
             </div>
-            <div className="px-4 py-2 border-b-2 border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
-              <p className="text-[10px] font-black uppercase tracking-wide text-gray-700 dark:text-gray-200 mb-2">Order Block overlays</p>
-              <div className="grid grid-cols-2 gap-2">
+            <div className="px-4 py-2 border-b border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
+              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-600 dark:text-gray-300 mb-1.5">Order Block overlays</p>
+              <div className="grid grid-cols-2 gap-1.5">
                 {[
                   { key: 'demand' as const, label: 'Buy zones (Demand)' },
                   { key: 'supply' as const, label: 'Sell zones (Supply)' },
@@ -1118,20 +1170,78 @@ export default function App() {
                   <button
                     key={toggle.key}
                     onClick={() => setOrderBlockVisibility((prev) => ({ ...prev, [toggle.key]: !prev[toggle.key] }))}
-                    className={`px-2 py-1.5 text-[10px] font-bold uppercase rounded border-2 transition-all ${orderBlockVisibility[toggle.key] ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}
+                    className={`px-2 py-1 text-[9px] font-semibold uppercase tracking-wide rounded-md border transition-all ${orderBlockVisibility[toggle.key] ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/15 dark:border-white/20'}`}
                   >
                     {toggle.label}
                   </button>
                 ))}
               </div>
             </div>
+            <div className="flex gap-1.5 px-4 py-2 border-b border-black/10 dark:border-white/10 bg-black/[0.015] dark:bg-white/[0.015]">
+              <button
+                onClick={() => setDetailViewTab('chart')}
+                className={`px-3 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] rounded-full border transition-all ${detailViewTab === 'chart' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/15 dark:border-white/20'}`}
+              >
+                Chart
+              </button>
+              <button
+                onClick={() => setDetailViewTab('heatmap')}
+                className={`px-3 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] rounded-full border transition-all ${detailViewTab === 'heatmap' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/15 dark:border-white/20'}`}
+              >
+                Heatmap
+              </button>
+            </div>
             <div className="flex-1 overflow-y-auto bg-street-light dark:bg-street-dark">
-               <div className="h-[350px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
-                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} orderBlockLevels={orderBlockLevels} theme={theme} mode={chartMode} visibility={orderBlockVisibility} noDataLabel={t.NO_SIGNALS} />
-               </div>
-               <div className="h-[320px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
-                  <OrderBlockHeatmap data={chartData} orderBlockLevels={orderBlockLevels} theme={theme} noDataLabel={t.NO_SIGNALS} />
-               </div>
+               {detailViewTab === 'chart' ? (
+                 <div className="h-[360px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
+                    <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} orderBlockLevels={orderBlockLevels} theme={theme} mode={chartMode} visibility={orderBlockVisibility} noDataLabel={t.NO_SIGNALS} />
+                 </div>
+               ) : (
+                 <>
+                   <div className="h-[360px] w-full border-b-2 border-black dark:border-white bg-[#030712] relative">
+                     <OrderBlockHeatmap data={chartData} orderBlockLevels={orderBlockLevels} theme={theme} noDataLabel={t.NO_SIGNALS} />
+                   </div>
+                   <div className="p-4 border-b-2 border-black/10 dark:border-white/10 space-y-3">
+                     <div>
+                       <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-gray-700 dark:text-gray-200 mb-1">Heatmap Description</h3>
+                       <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                         The Order Block Liquidity Map highlights where liquidity is concentrated across the current price ladder.
+                         Red horizontal bands mark potential short-liquidity pools and sell pressure zones, while green bands mark
+                         long-liquidity pools and buy-support zones. Brighter saturation indicates larger concentration and higher
+                         probability of reactive order flow.
+                       </p>
+                     </div>
+                     <div>
+                       <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-gray-700 dark:text-gray-200 mb-1">Structured Analysis</h3>
+                       {heatmapInsight ? (
+                         <div className="space-y-2 text-xs text-gray-700 dark:text-gray-300">
+                           <p>
+                             <span className="font-semibold">Liquidity concentration:</span> Long pressure {heatmapInsight.longPressure.toFixed(2)} vs short pressure {heatmapInsight.shortPressure.toFixed(2)}.
+                           </p>
+                           <p>
+                             <span className="font-semibold">Imbalance clusters:</span> Current skew is {(heatmapInsight.imbalanceScore * 100).toFixed(0)}%, indicating {heatmapInsight.imbalanceScore > 0.35 ? 'a directional liquidity tilt' : 'a relatively balanced liquidity field'}.
+                           </p>
+                           <div>
+                             <p className="font-semibold mb-1">Active pressure zones near {formatPrice(heatmapInsight.currentPrice)}:</p>
+                             <ul className="space-y-1 list-disc pl-4">
+                               {heatmapInsight.strongestClusters.map((cluster) => (
+                                 <li key={`${cluster.label}-${cluster.price}`}>
+                                   {cluster.side} cluster at {formatPrice(cluster.price)} ({cluster.distance >= 0 ? '+' : ''}{cluster.distance.toFixed(2)}%) • strength {cluster.strength.toFixed(2)}.
+                                 </li>
+                               ))}
+                             </ul>
+                           </div>
+                           <p>
+                             <span className="font-semibold">Contextual insight:</span> {heatmapInsight.contextLine}
+                           </p>
+                         </div>
+                       ) : (
+                         <p className="text-xs text-gray-600 dark:text-gray-400">Insufficient order-block data to build a structured heatmap analysis.</p>
+                       )}
+                     </div>
+                   </div>
+                 </>
+               )}
                <div className="grid grid-cols-3 gap-3 p-4">
                   {[
                       { l: 'RSI', v: activeMarket.indicators.rsi.toFixed(0), c: activeMarket.indicators.rsi > 70 ? 'text-pink-600 dark:text-street-pink' : activeMarket.indicators.rsi < 30 ? 'text-green-600 dark:text-street-acid' : '' },
