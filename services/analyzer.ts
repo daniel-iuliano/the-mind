@@ -2,6 +2,15 @@ import { IndicatorValues, MarketAnalysis, SignalBias } from "../types";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+interface OrderBlockSnapshot {
+  volumeNodeStrength: number;
+  positioningImbalance: number;
+  liquiditySkew: number;
+  highVolumeZonePressure: number;
+  structuralDemandSupply: number;
+  netBias: number;
+}
+
 interface PredictiveContext {
   symbol: string;
   price: number;
@@ -12,12 +21,61 @@ interface PredictiveContext {
   orderBookImbalance?: number | null;
 }
 
+
+const calculateOrderBlockSnapshot = (ctx: PredictiveContext): OrderBlockSnapshot => {
+  const { price, indicators, volume, prevVolume, change24h, orderBookImbalance } = ctx;
+
+  const atrPct = price > 0 ? indicators.atr / price : 0;
+  const trendSlope = price > 0 ? (indicators.ema20 - indicators.ema50) / price : 0;
+  const macroSlope = price > 0 ? (indicators.ema50 - indicators.ema200) / price : 0;
+  const bbRange = Math.max(indicators.bb.upper - indicators.bb.lower, price * 0.0025);
+  const bbPosition = clamp((price - indicators.bb.lower) / bbRange, 0, 1);
+  const volumeRatio = prevVolume > 0 ? volume / prevVolume : 1;
+
+  const volumeNodeStrength = clamp(Math.abs(volumeRatio - 1) * 55 + Math.max(0, atrPct - 0.01) * 900, 0, 100);
+
+  const positioningImbalance = typeof orderBookImbalance === 'number'
+    ? clamp(Math.abs(orderBookImbalance) * 230, 0, 100)
+    : clamp(Math.abs(trendSlope) * 8500, 0, 100);
+
+  const liquiditySkew = typeof orderBookImbalance === 'number'
+    ? clamp(Math.abs(orderBookImbalance) * 180 + Math.abs(change24h) * 4, 0, 100)
+    : clamp(Math.abs(change24h) * 6, 0, 100);
+
+  const highVolumeZonePressure = clamp((bbPosition < 0.3 || bbPosition > 0.7 ? 58 : 36) + volumeNodeStrength * 0.42, 0, 100);
+
+  const structuralDemandSupply = clamp(
+    Math.abs(trendSlope) * 7000 +
+    Math.abs(macroSlope) * 6000 +
+    (bbPosition <= 0.22 || bbPosition >= 0.78 ? 20 : 0),
+    0,
+    100
+  );
+
+  const orderFlowBias = typeof orderBookImbalance === 'number'
+    ? clamp(orderBookImbalance * 100, -100, 100)
+    : clamp((trendSlope + macroSlope) * 3000, -100, 100);
+
+  const structureBias = clamp((0.5 - bbPosition) * 120 + (0 - change24h) * 3.5, -100, 100);
+  const netBias = clamp(orderFlowBias * 0.58 + structureBias * 0.42, -100, 100);
+
+  return {
+    volumeNodeStrength,
+    positioningImbalance,
+    liquiditySkew,
+    highVolumeZonePressure,
+    structuralDemandSupply,
+    netBias,
+  };
+};
+
 const calculateForwardScores = (ctx: PredictiveContext) => {
   const { price, indicators, volume, prevVolume, change24h, orderBookImbalance } = ctx;
 
   let bull = 0;
   let bear = 0;
   const reasons: string[] = [];
+  const orderBlock = calculateOrderBlockSnapshot(ctx);
 
   const volumeRatio = prevVolume > 0 ? volume / prevVolume : 1;
   const atrPct = price > 0 ? indicators.atr / price : 0;
@@ -75,17 +133,27 @@ const calculateForwardScores = (ctx: PredictiveContext) => {
     reasons.push("FORWARD_LOW_CONVICTION");
   }
 
-  // Order book backlog / pressure proxy
+  // Order Block core logic (must drive bias decisions)
+  if (orderBlock.netBias >= 12) {
+    bull += 20;
+    reasons.push("ORDERBLOCK_DEMAND_DOMINANT");
+  } else if (orderBlock.netBias <= -12) {
+    bear += 20;
+    reasons.push("ORDERBLOCK_SUPPLY_DOMINANT");
+  } else {
+    bull += 4;
+    bear += 4;
+    reasons.push("ORDERBLOCK_TRANSITION");
+  }
+
+  if (orderBlock.volumeNodeStrength >= 55) reasons.push("ORDERBLOCK_HIGH_VOLUME_ZONE");
+  if (orderBlock.positioningImbalance >= 52) reasons.push("ORDERBLOCK_POSITIONING_IMBALANCE");
+  if (orderBlock.liquiditySkew >= 50) reasons.push("ORDERBLOCK_LIQUIDITY_CLUSTER");
+
   if (typeof orderBookImbalance === 'number') {
-    if (orderBookImbalance > 0.12) {
-      bull += 12;
-      reasons.push("ORDERBOOK_BID_DOMINANCE");
-    } else if (orderBookImbalance < -0.12) {
-      bear += 12;
-      reasons.push("ORDERBOOK_ASK_DOMINANCE");
-    } else {
-      reasons.push("ORDERBOOK_BALANCED");
-    }
+    if (orderBookImbalance > 0.12) reasons.push("ORDERBOOK_BID_DOMINANCE");
+    else if (orderBookImbalance < -0.12) reasons.push("ORDERBOOK_ASK_DOMINANCE");
+    else reasons.push("ORDERBOOK_BALANCED");
   }
 
   // Volatility regime quality weighting
@@ -105,6 +173,7 @@ const calculateForwardScores = (ctx: PredictiveContext) => {
     bearishStrength: clamp(Math.round(bear), 0, 100),
     reasons,
     volumeRatio,
+    orderBlock,
   };
 };
 

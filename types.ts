@@ -111,6 +111,8 @@ export interface PredictionResult {
   stopLoss: number | null;
   probability: number; // 0-100
   reasoning: string[];
+  nowSummary: string[];
+  nextScenarios: string[];
   riskLevel: 'BAJO' | 'MEDIO' | 'ALTO';
   timestamp: number;
 }

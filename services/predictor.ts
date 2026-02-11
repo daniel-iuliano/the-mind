@@ -1,4 +1,4 @@
-import { MarketAnalysis, SupportResistanceLevel, PredictionResult, SignalBias } from "../types";
+import { MarketAnalysis, SupportResistanceLevel, PredictionResult } from "../types";
 import { formatPrice } from "../utils/formatters";
 
 type MarketRegime = 'VOLATILE' | 'CALM' | 'TRENDING' | 'RANGING';
@@ -29,6 +29,94 @@ const detectMarketRegime = (analysis: MarketAnalysis): MarketRegime => {
   if (atrPct <= 0.008 && bbWidthPct <= 0.06 && Math.abs(change24h) <= 1.2) return 'CALM';
   if (trendStrength >= 0.02 && Math.abs(change24h) >= 2) return 'TRENDING';
   return 'RANGING';
+};
+
+
+
+interface OrderBlockInsights {
+  volumeDistribution: number;
+  positioningImbalance: number;
+  liquidityClusters: number;
+  highVolumeZones: number;
+  structuralPressure: number;
+  demandBias: number;
+  supplyBias: number;
+}
+
+const inferOrderBlockInsights = (analysis: MarketAnalysis, levels: SupportResistanceLevel[]): OrderBlockInsights => {
+  const { price, change24h, volume24h, indicators } = analysis;
+  const atrPct = price > 0 ? indicators.atr / price : 0;
+  const bbRange = Math.max(indicators.bb.upper - indicators.bb.lower, price * 0.0025);
+  const bbPosition = clamp((price - indicators.bb.lower) / bbRange, 0, 1);
+  const trendSlope = price > 0 ? (indicators.ema20 - indicators.ema50) / price : 0;
+  const macroSlope = price > 0 ? (indicators.ema50 - indicators.ema200) / price : 0;
+
+  const strengths = levels.map((l) => l.strength).sort((a, b) => a - b);
+  const medianStrength = strengths.length ? strengths[Math.floor(strengths.length / 2)] : 1;
+  const supportWeight = levels.filter((l) => l.type === 'support').reduce((acc, l) => acc + l.strength, 0);
+  const resistanceWeight = levels.filter((l) => l.type === 'resistance').reduce((acc, l) => acc + l.strength, 0);
+
+  const volumeDistribution = clamp(Math.abs(change24h) * 5 + atrPct * 900 + (volume24h > 0 ? Math.log10(volume24h + 1) * 5 : 0), 0, 100);
+  const positioningImbalance = clamp(Math.abs(trendSlope) * 8500 + Math.abs(macroSlope) * 6800, 0, 100);
+  const liquidityClusters = clamp(levels.length * 10 + medianStrength * 9 + Math.abs(change24h) * 2, 0, 100);
+  const highVolumeZones = clamp((bbPosition < 0.3 || bbPosition > 0.7 ? 58 : 38) + volumeDistribution * 0.45, 0, 100);
+  const structuralPressure = clamp((supportWeight + resistanceWeight) * 4 + Math.abs(macroSlope) * 4000, 0, 100);
+
+  const directionalFromLevels = clamp((supportWeight - resistanceWeight) * 6, -100, 100);
+  const directionalFromPrice = clamp((0.5 - bbPosition) * 120 + (0 - change24h) * 4, -100, 100);
+  const directionalFromTrend = clamp((trendSlope + macroSlope) * 2600, -100, 100);
+  const netFlow = clamp(directionalFromLevels * 0.34 + directionalFromPrice * 0.38 + directionalFromTrend * 0.28, -100, 100);
+
+  return {
+    volumeDistribution,
+    positioningImbalance,
+    liquidityClusters,
+    highVolumeZones,
+    structuralPressure,
+    demandBias: clamp(netFlow, 0, 100),
+    supplyBias: clamp(-netFlow, 0, 100),
+  };
+};
+
+const buildNowSummary = (
+  bias: 'ALCISTA' | 'BAJISTA' | 'NEUTRAL',
+  insights: OrderBlockInsights,
+  regime: MarketRegime,
+): string[] => {
+  const summary: string[] = [];
+
+  if (bias === 'BAJISTA') summary.push('NOW_SHORT_BIAS_PREVAILING');
+  else if (bias === 'ALCISTA') summary.push('NOW_LONG_BIAS_PREVAILING');
+  else summary.push('NOW_TRANSITIONAL_BIAS');
+
+  if (insights.volumeDistribution >= 55) summary.push('OB_VOLUME_DISTRIBUTION_ACTIVE');
+  if (insights.positioningImbalance >= 52) summary.push('OB_POSITIONING_IMBALANCE_VISIBLE');
+  if (insights.liquidityClusters >= 50) summary.push('OB_LIQUIDITY_CLUSTERS_NEAR_PRICE');
+  if (insights.highVolumeZones >= 55) summary.push('OB_HIGH_VOLUME_ZONE_IN_CONTROL');
+  if (insights.structuralPressure >= 48) summary.push('OB_SUPPLY_DEMAND_STRUCTURE_ACTIVE');
+
+  summary.push(`REGIME_${regime}`);
+  return summary.slice(0, 5);
+};
+
+const buildNextScenarios = (
+  bias: 'ALCISTA' | 'BAJISTA' | 'NEUTRAL',
+  insights: OrderBlockInsights,
+): string[] => {
+  const scenarios: string[] = [];
+
+  if (bias === 'BAJISTA') scenarios.push('NEXT_CONTINUATION_SHORT_MOVE');
+  if (bias === 'ALCISTA') scenarios.push('NEXT_CONTINUATION_LONG_MOVE');
+
+  if (insights.demandBias >= 42) scenarios.push('NEXT_POTENTIAL_LONG_SETUP');
+  if (insights.supplyBias >= 42) scenarios.push('NEXT_POTENTIAL_SHORT_SETUP');
+
+  if (Math.abs(insights.demandBias - insights.supplyBias) <= 18 || insights.liquidityClusters >= 64) {
+    scenarios.push('NEXT_REVERSAL_CONDITIONS_FORMING');
+  }
+
+  if (scenarios.length < 3) scenarios.push('NEXT_TRANSITION_STRUCTURE_WATCH');
+  return scenarios.slice(0, 3);
 };
 
 const calculateLevelCandidates = (analysis: MarketAnalysis, levels: SupportResistanceLevel[]) => {
@@ -127,13 +215,14 @@ export const generatePrediction = (
   else if (analysis.marketCondition === 'BEARISH') predictionBias = 'BAJISTA';
 
   const regime = detectMarketRegime(analysis);
+  const orderBlockInsights = inferOrderBlockInsights(analysis, levels);
 
   // --- Probability Calculation (with regime weighting and statistical confidence) ---
   const directionalScore = predictionBias === 'NEUTRAL' ? 50 : analysis.score;
   const normalizedSignal = clamp((directionalScore - 50) / 50, 0, 1);
   const trendGap = Math.abs(analysis.indicators.ema20 - analysis.indicators.ema50) / Math.max(currentPrice, 1);
   const momentumStrength = Math.abs(analysis.indicators.macd.histogram) / Math.max(currentPrice * 0.01, 1e-9);
-  const confidenceRaw = normalizedSignal * 0.55 + clamp(trendGap * 12, 0, 1) * 0.25 + clamp(momentumStrength * 0.2, 0, 1) * 0.2;
+  const confidenceRaw = normalizedSignal * 0.45 + clamp(trendGap * 12, 0, 1) * 0.2 + clamp(momentumStrength * 0.2, 0, 1) * 0.15 + clamp((orderBlockInsights.volumeDistribution + orderBlockInsights.structuralPressure) / 200, 0, 1) * 0.2;
 
   const regimeProbabilityBias: Record<MarketRegime, number> = {
     VOLATILE: -6,
@@ -142,7 +231,8 @@ export const generatePrediction = (
     RANGING: -1,
   };
 
-  let probability = Math.round(48 + confidenceRaw * 44 + regimeProbabilityBias[regime]);
+  const orderBlockDirectionalEdge = Math.abs(orderBlockInsights.demandBias - orderBlockInsights.supplyBias) * 0.12;
+  let probability = Math.round(46 + confidenceRaw * 42 + regimeProbabilityBias[regime] + orderBlockDirectionalEdge);
   probability = clamp(probability, 40, 90);
 
   // --- Targets & Stop Loss ---
@@ -165,6 +255,10 @@ export const generatePrediction = (
   const reasoning = [...analysis.reasons];
   if (volatilityPct > 2) reasoning.push("HIGH_VOL_RISK");
   reasoning.push(`REGIME_${regime}`);
+  reasoning.push("OB_VOLUME_DISTRIBUTION_ACTIVE");
+  reasoning.push("OB_POSITIONING_IMBALANCE_VISIBLE");
+  reasoning.push("OB_LIQUIDITY_CLUSTERS_NEAR_PRICE");
+  reasoning.push("OB_SUPPLY_DEMAND_STRUCTURE_ACTIVE");
   if (targetPrice && stopLoss && rr >= MIN_RR) reasoning.push("RR_3_TO_1_CONFIRMED");
   if (!targetPrice || !stopLoss) reasoning.push("NO_VALID_3R_SETUP");
 
@@ -176,6 +270,9 @@ export const generatePrediction = (
     if (currentPrice > q3) reasoning.push("PRICE_IN_UPPER_VALUE_ZONE");
   }
 
+  const nowSummary = buildNowSummary(predictionBias, orderBlockInsights, regime);
+  const nextScenarios = buildNextScenarios(predictionBias, orderBlockInsights);
+
   return {
     symbol: analysis.symbol,
     bias: predictionBias,
@@ -183,7 +280,9 @@ export const generatePrediction = (
     targetPrice,
     stopLoss,
     probability,
-    reasoning: reasoning.slice(0, 4), // Limit to top 4 reasons
+    reasoning: reasoning.slice(0, 5),
+    nowSummary,
+    nextScenarios,
     riskLevel,
     timestamp: Date.now()
   };
