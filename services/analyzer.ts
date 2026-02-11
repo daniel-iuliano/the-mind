@@ -28,7 +28,61 @@ interface MarketStateMemory {
   lastCondition: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 }
 
+interface PerfectTradeMemory {
+  robustScore: number;
+  confluenceScore: number;
+  holdMs: number;
+  lastTs: number;
+  active: boolean;
+}
+
 const MARKET_MEMORY = new Map<string, MarketStateMemory>();
+const PERFECT_TRADE_MEMORY = new Map<string, PerfectTradeMemory>();
+const PERFECT_TRADE_STORAGE_KEY = 'quantmind_perfect_trade_memory_v1';
+let perfectMemoryHydrated = false;
+
+const getStorage = (): Storage | null => {
+  if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) return null;
+  return globalThis.localStorage;
+};
+
+const hydratePerfectMemory = () => {
+  if (perfectMemoryHydrated) return;
+  perfectMemoryHydrated = true;
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    const raw = storage.getItem(PERFECT_TRADE_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, PerfectTradeMemory>;
+    Object.entries(parsed).forEach(([symbol, state]) => {
+      if (!state || typeof state.robustScore !== 'number') return;
+      PERFECT_TRADE_MEMORY.set(symbol, {
+        robustScore: clamp(state.robustScore, -100, 100),
+        confluenceScore: clamp(state.confluenceScore ?? 0, 0, 100),
+        holdMs: Math.max(0, state.holdMs ?? 0),
+        lastTs: state.lastTs ?? Date.now(),
+        active: Boolean(state.active),
+      });
+    });
+  } catch {
+    // ignore persistence corruption
+  }
+};
+
+const persistPerfectMemory = () => {
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    const payload = Array.from(PERFECT_TRADE_MEMORY.entries()).reduce<Record<string, PerfectTradeMemory>>((acc, [symbol, state]) => {
+      acc[symbol] = state;
+      return acc;
+    }, {});
+    storage.setItem(PERFECT_TRADE_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore quota errors
+  }
+};
 
 const timeframeToMs = (timeframe?: Timeframe): number => {
   switch (timeframe) {
@@ -378,6 +432,8 @@ export const scoreMarket = (
   candles?: OHLCV[],
   timeframe?: Timeframe,
 ): MarketAnalysis => {
+  hydratePerfectMemory();
+
   const { bullishStrength, bearishStrength, reasons, volumeRatio } = calculateForwardScores({
     symbol,
     price,
@@ -426,6 +482,101 @@ export const scoreMarket = (
     else if (conditionStrength >= 55) bias = SignalBias.SELL;
   }
 
+  const trendSlope = price > 0 ? (indicators.ema20 - indicators.ema50) / price : 0;
+  const macroSlope = price > 0 ? (indicators.ema50 - indicators.ema200) / price : 0;
+  const atrPct = price > 0 ? indicators.atr / price : 0;
+  const momentum = indicators.macd.histogram;
+  const stochUp = indicators.stochRsi.k > indicators.stochRsi.d;
+  const stochDown = indicators.stochRsi.k < indicators.stochRsi.d;
+  const strongBull = bias === SignalBias.STRONG_BUY || bias === SignalBias.BUY;
+  const strongBear = bias === SignalBias.STRONG_SELL || bias === SignalBias.SELL;
+  const side: 'LONG' | 'SHORT' | 'NONE' = strongBull ? 'LONG' : strongBear ? 'SHORT' : 'NONE';
+
+  const trendConfirmed = (trendSlope > 0.0022 && macroSlope > 0.0036 && strongBull) || (trendSlope < -0.0022 && macroSlope < -0.0036 && strongBear);
+  const candleConfirmed = reasons.some((r) => side === 'LONG' ? r.includes('CANDLE_BULL') || r.includes('ENGULFING') || r.includes('PINBAR_BULL') : side === 'SHORT' ? r.includes('CANDLE_BEAR') || r.includes('ENGULFING') || r.includes('PINBAR_BEAR') : false);
+  const orderBlockAligned = reasons.some((r) => (side === 'LONG' && r === 'ORDERBLOCK_DEMAND_DOMINANT') || (side === 'SHORT' && r === 'ORDERBLOCK_SUPPLY_DOMINANT'));
+  const volumeConfirmed = volumeRatio >= 1.15;
+  const momentumConfirmed = (side === 'LONG' && momentum > 0 && stochUp) || (side === 'SHORT' && momentum < 0 && stochDown);
+  const volatilityAligned = atrPct >= 0.007 && atrPct <= 0.028;
+  const structureConfirmed = reasons.some((r) => (side === 'LONG' && (r === 'STRUCTURE_HH_HL_BULL' || r === 'STRUCTURE_CHOCH_BULL')) || (side === 'SHORT' && (r === 'STRUCTURE_LH_LL_BEAR' || r === 'STRUCTURE_CHOCH_BEAR')));
+
+  const slBase = side === 'LONG'
+    ? Math.max(price - indicators.atr * 1.2, price * 0.6)
+    : side === 'SHORT'
+      ? price + indicators.atr * 1.2
+      : price;
+  const tpBase = side === 'LONG'
+    ? price + indicators.atr * 3.9
+    : side === 'SHORT'
+      ? Math.max(price - indicators.atr * 3.9, price * 0.25)
+      : price;
+  const risk = Math.max(Math.abs(price - slBase), price * 0.0001);
+  const reward = Math.max(Math.abs(tpBase - price), 0);
+  const rr = reward / risk;
+  const rrConfirmed = rr >= 3;
+
+  const weightedChecks = [
+    { ok: trendConfirmed, weight: 18 },
+    { ok: candleConfirmed, weight: 12 },
+    { ok: orderBlockAligned, weight: 16 },
+    { ok: volumeConfirmed, weight: 10 },
+    { ok: momentumConfirmed, weight: 14 },
+    { ok: volatilityAligned, weight: 10 },
+    { ok: structureConfirmed, weight: 12 },
+    { ok: rrConfirmed, weight: 8 },
+  ];
+  const confluenceScore = weightedChecks.reduce((acc, item) => acc + (item.ok ? item.weight : 0), 0);
+  const strictAligned = weightedChecks.every((item) => item.ok) && side !== 'NONE';
+
+  const prevPerfect = PERFECT_TRADE_MEMORY.get(symbol) ?? {
+    robustScore: 0,
+    confluenceScore: 0,
+    holdMs: 0,
+    lastTs: Date.now(),
+    active: false,
+  };
+  const nowTs = Date.now();
+  const elapsedMs = clamp(nowTs - prevPerfect.lastTs, 1_000, 120_000);
+  const momentumFactor = clamp(Math.abs(momentum) * 4200, 0, 9);
+  const addPerMinute = 8 + (confluenceScore / 100) * 10 + momentumFactor * 0.35;
+  const decayPerMinute = 16 + (100 - confluenceScore) * 0.08;
+  const deltaScore = strictAligned ? addPerMinute * (elapsedMs / 60_000) : -decayPerMinute * (elapsedMs / 60_000);
+  const robustScore = clamp(prevPerfect.robustScore * 0.84 + deltaScore, -100, 100);
+  const holdMs = strictAligned ? Math.min(prevPerfect.holdMs + elapsedMs, 45 * 60_000) : Math.max(0, prevPerfect.holdMs - elapsedMs * 1.4);
+  const holdMinutes = holdMs / 60_000;
+  const threshold = 68;
+  const minStabilityMinutes = 2.5;
+  const deactivateThreshold = 58;
+  const isActive = prevPerfect.active
+    ? robustScore >= deactivateThreshold && holdMinutes >= minStabilityMinutes * 0.6
+    : robustScore >= threshold && holdMinutes >= minStabilityMinutes && strictAligned;
+
+  PERFECT_TRADE_MEMORY.set(symbol, {
+    robustScore,
+    confluenceScore,
+    holdMs,
+    lastTs: nowTs,
+    active: isActive,
+  });
+
+  const keysByScore = Array.from(PERFECT_TRADE_MEMORY.entries())
+    .map(([key, state]) => ({ key, score: state.robustScore }))
+    .sort((a, b) => b.score - a.score);
+  const bestKey = keysByScore[0]?.key ?? null;
+  const worstKey = keysByScore[keysByScore.length - 1]?.key ?? null;
+  persistPerfectMemory();
+
+  const perfectSummary = [
+    `Confluence ${confluenceScore}/100 with strict ${weightedChecks.filter((x) => x.ok).length}/8 blocks aligned.`,
+    `Stability window held for ${holdMinutes.toFixed(1)}m with robust score ${robustScore.toFixed(1)}.`,
+    `Validated structure + order block + momentum agree on ${side === 'LONG' ? 'long' : side === 'SHORT' ? 'short' : 'neutral'} continuation.`,
+  ];
+  const perfectExpectations = [
+    side === 'LONG' ? 'If bid pressure persists, continuation toward TP is favored.' : side === 'SHORT' ? 'If ask pressure persists, continuation toward TP is favored.' : 'No directional expectation until confluence recovers.',
+    `Risk framework: RR ${rr.toFixed(2)} with SL ${slBase.toFixed(4)} and TP ${tpBase.toFixed(4)}.`,
+    strictAligned ? 'Signal is noise-filtered by multi-minute persistence.' : 'Signal remains in build-up phase; no star trigger yet.',
+  ];
+
   const earlyLongScore = clamp(Math.round(
     bullishStrength * 0.55 +
     (indicators.stochRsi.k > indicators.stochRsi.d ? 18 : 0) +
@@ -467,6 +618,22 @@ export const scoreMarket = (
       side: earlySide,
       confidence: Math.max(earlyLongScore, earlyShortScore),
       reasons: earlyReasons,
+    },
+    perfectTrade: {
+      active: isActive,
+      robustScore: Number(robustScore.toFixed(2)),
+      confluenceScore,
+      threshold,
+      stabilityMinutes: Number(holdMinutes.toFixed(2)),
+      holdMinutes: Number(minStabilityMinutes.toFixed(2)),
+      side,
+      rr: Number(rr.toFixed(2)),
+      tp: Number.isFinite(tpBase) ? tpBase : null,
+      sl: Number.isFinite(slBase) ? slBase : null,
+      summary: perfectSummary,
+      expectations: perfectExpectations,
+      bestKey,
+      worstKey,
     },
     timestamp: Date.now(),
   };
