@@ -30,6 +30,24 @@ export interface SupportResistanceLevel {
   strength: number; // How many times it was tested
 }
 
+export type OrderBlockLevelType =
+  | 'demand'
+  | 'supply'
+  | 'highVolume'
+  | 'liquidity'
+  | 'imbalance';
+
+export interface OrderBlockLevel {
+  type: OrderBlockLevelType;
+  price: number;
+  strength: number;
+  label: string;
+  zone?: {
+    low: number;
+    high: number;
+  };
+}
+
 export interface IndicatorValues {
   rsi: number;
   stochRsi: {
