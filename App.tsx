@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { fetchCandles, fetchOrderBookImbalance, fetchTop30Markets, fetchTicker, getExchangeAppUrl, getExchangeUrl } from './services/coinex';
+import { fetchCandles, fetchOpenInterest, fetchOrderBookImbalance, fetchTop30Markets, fetchTicker, getExchangeAppUrl, getExchangeUrl } from './services/coinex';
 import { analyzeCandles, calculateOrderBlockLevels, calculateSupportResistance } from './services/indicators';
 import { scoreMarket } from './services/analyzer';
 import { generateAIAnalysis } from './services/geminiService';
@@ -715,10 +715,11 @@ export default function App() {
       if (!isScanning) break;
       setLoadingMap(prev => ({ ...prev, [symbol]: true }));
       try {
-        const [candles, ticker, orderBookImbalance] = await Promise.all([
+        const [candles, ticker, orderBookImbalance, oiCurrent] = await Promise.all([
              fetchCandles(symbol, activeTimeframe).catch(e => null),
              fetchTicker(symbol).catch(e => null),
-             fetchOrderBookImbalance(symbol).catch(() => null)
+             fetchOrderBookImbalance(symbol).catch(() => null),
+             fetchOpenInterest(symbol).catch(() => null)
         ]);
         if (!candles || candles.length < 50) continue;
         const indicators = analyzeCandles(candles);
@@ -728,7 +729,7 @@ export default function App() {
         const prevVolume = prevCandle.volume; 
         const open24h = candles[candles.length - Math.min(24, candles.length)]?.open || livePrice;
         const changeVal = ticker ? ticker.change : ((livePrice - open24h) / open24h) * 100;
-        const analysis = scoreMarket(symbol, livePrice, indicators, liveVolume, prevVolume, changeVal, orderBookImbalance, candles, activeTimeframe);
+        const analysis = scoreMarket(symbol, livePrice, indicators, liveVolume, prevVolume, changeVal, orderBookImbalance, candles, activeTimeframe, oiCurrent, null);
         orderFlowRef.current.set(symbol, orderBookImbalance ?? null);
 
         setMarketData(prevData => {
@@ -1280,6 +1281,26 @@ export default function App() {
                     </div>
                   )}
                </div>
+               {activeMarket.institutional && (
+                <div className="mx-4 mb-4 p-4 border-2 border-black dark:border-white rounded-xl bg-street-cardLight dark:bg-street-cardDark shadow-brutal-sm">
+                  <h3 className="text-xs font-black uppercase tracking-wide mb-2">🏛️ Institutional Dashboard</h3>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                    <div>Regime: <span className="font-black">{activeMarket.institutional.regime.replaceAll('_', ' ')}</span></div>
+                    <div>Institutional Score: <span className="font-black">{activeMarket.institutional.score}/100</span></div>
+                    <div>Quality: <span className="font-black">{activeMarket.institutional.quality.replaceAll('_', ' ')}</span></div>
+                    <div>OI State: <span className="font-black">{activeMarket.institutional.oiState.replaceAll('_', ' ')}</span></div>
+                    <div>Volatility: <span className="font-black">{activeMarket.institutional.volatilityState}</span></div>
+                    <div>Bias: <span className="font-black">{activeMarket.institutional.bias}</span></div>
+                    <div>Trade Allowed: <span className="font-black">{activeMarket.institutional.tradeAllowed ? 'YES' : 'NO'}</span></div>
+                    <div>Sweep: <span className="font-black">{activeMarket.institutional.sweep ? `${activeMarket.institutional.sweep.side} CONFIRMED` : 'NONE'}</span></div>
+                  </div>
+                  {activeMarket.institutional.smartEntry && (
+                    <div className="mt-2 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                      Smart Entry → {activeMarket.institutional.smartEntry.side} | Entry {formatPrice(activeMarket.institutional.smartEntry.entry)} | SL {formatPrice(activeMarket.institutional.smartEntry.stopLoss)} | TP {formatPrice(activeMarket.institutional.smartEntry.takeProfit)} | RR {activeMarket.institutional.smartEntry.rr.toFixed(2)} | Size {activeMarket.institutional.smartEntry.sizePct}%
+                    </div>
+                  )}
+                </div>
+               )}
                {activeMarket.perfectTrade && (
                 <div className={`mx-4 mb-4 p-4 border-2 rounded-xl relative overflow-hidden ${activeMarket.perfectTrade.active ? 'border-yellow-400 bg-yellow-100/50 dark:bg-yellow-500/10 animate-pulse' : 'border-black dark:border-white bg-transparent'}`}>
                   <div className="flex items-center justify-between mb-2">

@@ -184,3 +184,11 @@ export const fetchCandles = async (symbol: string, timeframe: Timeframe): Promis
     throw e; 
   }
 };
+
+
+// Optional OI endpoint wrapper (may be unavailable depending on exchange/provider).
+export const fetchOpenInterest = async (_symbol: string): Promise<number | null> => {
+  // CoinEx public endpoints do not consistently expose perpetual OI in all environments.
+  // Keep this optional so institutional modules can gracefully degrade to UNAVAILABLE.
+  return null;
+};

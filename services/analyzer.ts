@@ -492,6 +492,153 @@ const calculateForwardScores = (ctx: PredictiveContext) => {
   };
 };
 
+
+interface InstitutionalModuleResult {
+  score: number;
+  quality: 'HIGH_PROBABILITY_SETUP' | 'VALID_SETUP' | 'AVOID_TRADE';
+  regime: 'STRONG_TREND' | 'EXPANSION_PHASE' | 'RANGE' | 'DISTRIBUTION' | 'LOW_VOLATILITY';
+  oiState: 'AGGRESSIVE_LONGS' | 'AGGRESSIVE_SHORTS' | 'SHORT_SQUEEZE' | 'LONG_SQUEEZE' | 'UNAVAILABLE' | 'NEUTRAL';
+  volatilityState: 'EXPANDING' | 'CONTRACTING' | 'BALANCED';
+  bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  tradeAllowed: boolean;
+  sweep: { side: 'LONG' | 'SHORT'; confirmed: boolean; level: number; time: number } | null;
+  smartEntry: { side: 'LONG' | 'SHORT'; entry: number; stopLoss: number; takeProfit: number; rr: number; sizePct: number } | null;
+}
+
+const computeAdxProxy = (candles: OHLCV[]): number => {
+  if (candles.length < 20) return 16;
+  const recent = candles.slice(-20);
+  const changes = recent.slice(1).map((c, i) => Math.abs(c.close - recent[i].close) / Math.max(recent[i].close, 1e-8));
+  const drift = Math.abs(recent[recent.length - 1].close - recent[0].close) / Math.max(recent[0].close, 1e-8);
+  const noise = changes.reduce((a, b) => a + b, 0) / Math.max(changes.length, 1);
+  return clamp((drift / Math.max(noise, 1e-6)) * 18, 8, 55);
+};
+
+const computeInstitutionalModule = (ctx: {
+  symbol: string;
+  price: number;
+  indicators: IndicatorValues;
+  volume: number;
+  prevVolume: number;
+  change24h: number;
+  candles?: OHLCV[];
+  reasons: string[];
+  side: 'LONG' | 'SHORT' | 'NONE';
+  confluenceScore: number;
+  orderBlock: OrderBlockSnapshot;
+  rr: number;
+  orderBookImbalance?: number | null;
+  oiCurrent?: number | null;
+  oiPrev?: number | null;
+}): InstitutionalModuleResult => {
+  const candles = ctx.candles ?? [];
+  const latest = candles[candles.length - 1];
+  const previous = candles[candles.length - 2];
+  const highs = candles.slice(-30).map((c) => c.high);
+  const lows = candles.slice(-30).map((c) => c.low);
+  const prevHigh = highs.length ? Math.max(...highs.slice(0, -1)) : ctx.price;
+  const prevLow = lows.length ? Math.min(...lows.slice(0, -1)) : ctx.price;
+
+  const shortSweepConfirmed = !!latest && latest.high > prevHigh && latest.close < prevHigh;
+  const longSweepConfirmed = !!latest && latest.low < prevLow && latest.close > prevLow;
+  const sweep = shortSweepConfirmed
+    ? { side: 'SHORT' as const, confirmed: true, level: prevHigh, time: latest.time }
+    : longSweepConfirmed
+      ? { side: 'LONG' as const, confirmed: true, level: prevLow, time: latest.time }
+      : null;
+
+  const volumeRatio = ctx.prevVolume > 0 ? ctx.volume / ctx.prevVolume : 1;
+  const volumeSpike = volumeRatio >= 1.24;
+
+  const oiAvailable = typeof ctx.oiCurrent === 'number' && typeof ctx.oiPrev === 'number';
+  const oiDelta = oiAvailable ? (ctx.oiCurrent! - ctx.oiPrev!) / Math.max(Math.abs(ctx.oiPrev!), 1e-8) : 0;
+  const priceDelta = latest && previous ? (latest.close - previous.close) / Math.max(previous.close, 1e-8) : 0;
+
+  let oiState: InstitutionalModuleResult['oiState'] = 'UNAVAILABLE';
+  if (oiAvailable) {
+    if (priceDelta > 0 && oiDelta > 0) oiState = 'AGGRESSIVE_LONGS';
+    else if (priceDelta < 0 && oiDelta > 0) oiState = 'AGGRESSIVE_SHORTS';
+    else if (priceDelta > 0 && oiDelta < 0) oiState = 'SHORT_SQUEEZE';
+    else if (priceDelta < 0 && oiDelta < 0) oiState = 'LONG_SQUEEZE';
+    else oiState = 'NEUTRAL';
+  }
+
+  const mssConfirmed = ctx.reasons.some((r) => r.includes('BREAK_OF_STRUCTURE') || r.includes('CHOCH'));
+  const cleanRetest = ctx.reasons.some((r) => r.includes('ORDERBLOCK_DEMAND_DOMINANT') || r.includes('ORDERBLOCK_SUPPLY_DOMINANT'));
+
+  const atrPct = ctx.price > 0 ? ctx.indicators.atr / ctx.price : 0;
+  const bbWidth = ctx.price > 0 ? (ctx.indicators.bb.upper - ctx.indicators.bb.lower) / ctx.price : 0;
+  const adxProxy = computeAdxProxy(candles);
+  const volContracting = bbWidth < 0.035 && atrPct < 0.0068;
+  const volExpanding = bbWidth > 0.082 || atrPct > 0.018;
+
+  let regime: InstitutionalModuleResult['regime'] = 'RANGE';
+  if (volContracting) regime = 'LOW_VOLATILITY';
+  else if (adxProxy >= 31 && Math.abs(ctx.change24h) >= 2) regime = 'STRONG_TREND';
+  else if (volExpanding && adxProxy >= 22) regime = 'EXPANSION_PHASE';
+  else if (Math.abs(ctx.change24h) >= 5.5 && adxProxy < 21) regime = 'DISTRIBUTION';
+
+  const volatilityState: InstitutionalModuleResult['volatilityState'] = volExpanding ? 'EXPANDING' : volContracting ? 'CONTRACTING' : 'BALANCED';
+  const bias: InstitutionalModuleResult['bias'] = ctx.side === 'LONG' ? 'BULLISH' : ctx.side === 'SHORT' ? 'BEARISH' : 'NEUTRAL';
+
+  const oiDivergence = oiState === 'SHORT_SQUEEZE' || oiState === 'LONG_SQUEEZE' || oiState === 'AGGRESSIVE_LONGS' || oiState === 'AGGRESSIVE_SHORTS';
+  const fundingExtreme = typeof ctx.orderBookImbalance === 'number' && Math.abs(ctx.orderBookImbalance) >= 0.62;
+
+  let institutionalScore = 0;
+  if (sweep?.confirmed) institutionalScore += 20;
+  if (oiDivergence) institutionalScore += 15;
+  if (volumeSpike) institutionalScore += 15;
+  if (mssConfirmed) institutionalScore += 20;
+  if (fundingExtreme) institutionalScore += 10;
+  if (cleanRetest) institutionalScore += 20;
+  institutionalScore = clamp(institutionalScore, 0, 100);
+
+  const quality = institutionalScore >= 80 ? 'HIGH_PROBABILITY_SETUP' : institutionalScore >= 60 ? 'VALID_SETUP' : 'AVOID_TRADE';
+  const tradeAllowed = regime !== 'LOW_VOLATILITY' && institutionalScore >= 60;
+
+  const directionalOiConfirm = (ctx.side === 'LONG' && (oiState === 'AGGRESSIVE_LONGS' || oiState === 'SHORT_SQUEEZE'))
+    || (ctx.side === 'SHORT' && (oiState === 'AGGRESSIVE_SHORTS' || oiState === 'LONG_SQUEEZE'));
+  const smartEntryAllowed = !!sweep?.confirmed
+    && mssConfirmed
+    && directionalOiConfirm
+    && volumeSpike
+    && institutionalScore >= 60
+    && ctx.side !== 'NONE';
+
+  let smartEntry: InstitutionalModuleResult['smartEntry'] = null;
+  if (smartEntryAllowed) {
+    const atr = Math.max(ctx.indicators.atr, ctx.price * 0.0015);
+    const liqAnchor = sweep?.level ?? ctx.price;
+    const stopLoss = ctx.side === 'LONG' ? Math.min(liqAnchor - atr * 0.6, ctx.price - atr * 0.85) : Math.max(liqAnchor + atr * 0.6, ctx.price + atr * 0.85);
+    const risk = Math.max(Math.abs(ctx.price - stopLoss), ctx.price * 0.0008);
+    const takeProfit = ctx.side === 'LONG' ? ctx.price + risk * 3.2 : ctx.price - risk * 3.2;
+    const rr = Math.abs(takeProfit - ctx.price) / risk;
+    const riskAdj = regime === 'STRONG_TREND' ? 1 : regime === 'LOW_VOLATILITY' ? 0.45 : 0.72;
+    const sizePct = clamp((institutionalScore / 100) * riskAdj * (rr >= 3 ? 1 : 0.7), 0.1, 1);
+    smartEntry = {
+      side: ctx.side,
+      entry: ctx.price,
+      stopLoss,
+      takeProfit,
+      rr,
+      sizePct: Number((sizePct * 100).toFixed(1)),
+    };
+  }
+
+  return {
+    score: institutionalScore,
+    quality,
+    regime,
+    oiState,
+    volatilityState,
+    bias,
+    tradeAllowed,
+    sweep,
+    smartEntry,
+  };
+};
+
+
 export const scoreMarket = (
   symbol: string,
   price: number,
@@ -502,6 +649,8 @@ export const scoreMarket = (
   orderBookImbalance?: number | null,
   candles?: OHLCV[],
   timeframe?: Timeframe,
+  oiCurrent?: number | null,
+  oiPrev?: number | null,
 ): MarketAnalysis => {
   hydratePerfectMemory();
   const nowTs = Date.now();
@@ -627,6 +776,24 @@ export const scoreMarket = (
   const confluenceScore = weightedChecks.reduce((acc, item) => acc + (item.ok ? item.weight : 0), 0);
   const strictAligned = weightedChecks.every((item) => item.ok) && side !== 'NONE' && rrConfirmed;
 
+  const institutional = computeInstitutionalModule({
+    symbol,
+    price,
+    indicators,
+    volume,
+    prevVolume,
+    change24h,
+    candles,
+    reasons,
+    side,
+    confluenceScore,
+    orderBlock,
+    rr,
+    orderBookImbalance,
+    oiCurrent,
+    oiPrev,
+  });
+
   const prevPerfect = PERFECT_TRADE_MEMORY.get(symbol) ?? {
     robustScore: 0,
     confluenceScore: 0,
@@ -636,13 +803,13 @@ export const scoreMarket = (
   };
   const elapsedMs = clamp(Math.max(0, nowTs - prevPerfect.lastTs), 0, 120_000);
   const momentumFactor = clamp(Math.abs(momentum) * 4200, 0, 9);
-  const addPerMinute = 8 + (confluenceScore / 100) * 10 + momentumFactor * 0.35;
+  const addPerMinute = 8 + (confluenceScore / 100) * 10 + momentumFactor * 0.35 + institutional.score * 0.04;
   const decayPerMinute = 16 + (100 - confluenceScore) * 0.08;
   const deltaScore = strictAligned ? addPerMinute * (elapsedMs / 60_000) : -decayPerMinute * (elapsedMs / 60_000);
   const robustScore = clamp(prevPerfect.robustScore * 0.84 + deltaScore, -100, 100);
   const holdMs = strictAligned ? Math.min(prevPerfect.holdMs + elapsedMs, 45 * 60_000) : Math.max(0, prevPerfect.holdMs - elapsedMs * 1.4);
   const holdMinutes = holdMs / 60_000;
-  const threshold = contradictionDetected ? 82 : 74;
+  const threshold = contradictionDetected ? 82 : institutional.score >= 80 ? 70 : 74;
   const minStabilityMinutes = 2.5;
   const deactivateThreshold = contradictionDetected ? 70 : 64;
   const isActive = prevPerfect.active
@@ -717,9 +884,9 @@ export const scoreMarket = (
     indicators,
     marketCondition,
     conditionStrength,
-    score: conditionStrength,
+    score: Math.round(clamp(conditionStrength * 0.68 + institutional.score * 0.32, 0, 100)),
     bias,
-    reasons: Array.from(new Set(reasons)).slice(0, 12),
+    reasons: Array.from(new Set([...(institutional.sweep ? [institutional.sweep.side === 'LONG' ? 'LIQUIDITY_SWEEP_LONG_CONFIRMED' : 'LIQUIDITY_SWEEP_SHORT_CONFIRMED'] : []), ...reasons])).slice(0, 16),
     earlySignal: {
       side: earlySide,
       confidence: Math.max(earlyLongScore, earlyShortScore),
@@ -733,13 +900,24 @@ export const scoreMarket = (
       stabilityMinutes: Number(holdMinutes.toFixed(2)),
       holdMinutes: Number(minStabilityMinutes.toFixed(2)),
       side,
-      rr: Number(rr.toFixed(2)),
-      tp: Number.isFinite(tpBase) ? tpBase : null,
-      sl: Number.isFinite(slBase) ? slBase : null,
+      rr: Number((institutional.smartEntry?.rr ?? rr).toFixed(2)),
+      tp: Number.isFinite(institutional.smartEntry?.takeProfit ?? tpBase) ? (institutional.smartEntry?.takeProfit ?? tpBase) : null,
+      sl: Number.isFinite(institutional.smartEntry?.stopLoss ?? slBase) ? (institutional.smartEntry?.stopLoss ?? slBase) : null,
       summary: perfectSummary,
       expectations: perfectExpectations,
       bestKey,
       worstKey,
+    },
+    institutional: {
+      score: institutional.score,
+      quality: institutional.quality,
+      regime: institutional.regime,
+      oiState: institutional.oiState,
+      volatilityState: institutional.volatilityState,
+      bias: institutional.bias,
+      tradeAllowed: institutional.tradeAllowed,
+      sweep: institutional.sweep,
+      smartEntry: institutional.smartEntry,
     },
     timestamp: nowTs,
   };

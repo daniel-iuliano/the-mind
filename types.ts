@@ -35,16 +35,24 @@ export type OrderBlockLevelType =
   | 'supply'
   | 'highVolume'
   | 'liquidity'
-  | 'imbalance';
+  | 'imbalance'
+  | 'liquidityPool'
+  | 'sweep'
+  | 'absorption';
 
 export interface OrderBlockLevel {
   type: OrderBlockLevelType;
   price: number;
   strength: number;
   label: string;
+  mitigated?: boolean;
+  side?: 'LONG' | 'SHORT';
+  intensity?: number;
   zone?: {
     low: number;
     high: number;
+    startTime?: number;
+    endTime?: number;
   };
 }
 
@@ -110,6 +118,29 @@ export interface MarketAnalysis {
     expectations: string[];
     bestKey: string | null;
     worstKey: string | null;
+  };
+  institutional?: {
+    score: number;
+    quality: 'HIGH_PROBABILITY_SETUP' | 'VALID_SETUP' | 'AVOID_TRADE';
+    regime: 'STRONG_TREND' | 'EXPANSION_PHASE' | 'RANGE' | 'DISTRIBUTION' | 'LOW_VOLATILITY';
+    oiState: 'AGGRESSIVE_LONGS' | 'AGGRESSIVE_SHORTS' | 'SHORT_SQUEEZE' | 'LONG_SQUEEZE' | 'UNAVAILABLE' | 'NEUTRAL';
+    volatilityState: 'EXPANDING' | 'CONTRACTING' | 'BALANCED';
+    bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    tradeAllowed: boolean;
+    sweep?: {
+      side: 'LONG' | 'SHORT';
+      confirmed: boolean;
+      level: number;
+      time: number;
+    } | null;
+    smartEntry?: {
+      side: 'LONG' | 'SHORT';
+      entry: number;
+      stopLoss: number;
+      takeProfit: number;
+      rr: number;
+      sizePct: number;
+    } | null;
   };
   timestamp: number;
 }
