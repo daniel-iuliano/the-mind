@@ -64,7 +64,9 @@ export interface MarketAnalysis {
   change24h: number; // Calculated from open of last 24h candle
   volume24h: number;
   indicators: IndicatorValues;
-  score: number; // 0 to 100
+  marketCondition: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  conditionStrength: number; // 0 to 100 strength inside the detected condition
+  score: number; // Alias used by existing UI/alerts (maps to conditionStrength)
   bias: SignalBias;
   reasons: string[];
   earlySignal: EarlySignal;

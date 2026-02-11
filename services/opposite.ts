@@ -53,7 +53,14 @@ const invertEarlySignal = (earlySignal: EarlySignal): EarlySignal => {
 
 export const invertMarketAnalysis = (analysis: MarketAnalysis): MarketAnalysis => ({
   ...analysis,
-  score: 100 - analysis.score,
+  marketCondition:
+    analysis.marketCondition === 'BULLISH'
+      ? 'BEARISH'
+      : analysis.marketCondition === 'BEARISH'
+        ? 'BULLISH'
+        : 'NEUTRAL',
+  score: analysis.score,
+  conditionStrength: analysis.conditionStrength,
   bias: SIGNAL_OPPOSITE[analysis.bias],
   reasons: analysis.reasons.map(invertReason),
   earlySignal: invertEarlySignal(analysis.earlySignal),

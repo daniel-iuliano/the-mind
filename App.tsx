@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { fetchCandles, fetchTop30Markets, fetchTicker, getExchangeAppUrl, getExchangeUrl } from './services/coinex';
+import { fetchCandles, fetchOrderBookImbalance, fetchTop30Markets, fetchTicker, getExchangeAppUrl, getExchangeUrl } from './services/coinex';
 import { analyzeCandles, calculateSupportResistance } from './services/indicators';
 import { scoreMarket } from './services/analyzer';
 import { generateAIAnalysis } from './services/geminiService';
@@ -592,9 +592,10 @@ export default function App() {
       if (!isScanning) break;
       setLoadingMap(prev => ({ ...prev, [symbol]: true }));
       try {
-        const [candles, ticker] = await Promise.all([
+        const [candles, ticker, orderBookImbalance] = await Promise.all([
              fetchCandles(symbol, activeTimeframe).catch(e => null),
-             fetchTicker(symbol).catch(e => null)
+             fetchTicker(symbol).catch(e => null),
+             fetchOrderBookImbalance(symbol).catch(() => null)
         ]);
         if (!candles || candles.length < 50) continue;
         const indicators = analyzeCandles(candles);
@@ -604,7 +605,7 @@ export default function App() {
         const prevVolume = prevCandle.volume; 
         const open24h = candles[candles.length - Math.min(24, candles.length)]?.open || livePrice;
         const changeVal = ticker ? ticker.change : ((livePrice - open24h) / open24h) * 100;
-        const analysis = scoreMarket(symbol, livePrice, indicators, liveVolume, prevVolume, changeVal);
+        const analysis = scoreMarket(symbol, livePrice, indicators, liveVolume, prevVolume, changeVal, orderBookImbalance);
 
         setMarketData(prevData => {
             const existingIndex = prevData.findIndex((d) => d.symbol === symbol);
