@@ -177,6 +177,17 @@ const ModalWrapper = ({ isOpen, onClose, title, children, color = "border-black 
     );
 };
 
+const getPredictionBiasLabel = (bias: PredictionResult['bias'], lang: Language): string => {
+    if (lang === 'ES') {
+        if (bias === 'ALCISTA') return 'Sesgo Long';
+        if (bias === 'BAJISTA') return 'Sesgo Short';
+        return 'Neutral';
+    }
+    if (bias === 'ALCISTA') return 'Long Bias';
+    if (bias === 'BAJISTA') return 'Short Bias';
+    return 'Neutral';
+};
+
 const PredictionContent = ({ result, currentPrice, onClose, onOpenPosition, lang }: { result: PredictionResult, currentPrice: number | null, onClose: () => void, onOpenPosition: () => void, lang: Language }) => {
     const t = TRANSLATIONS[lang];
     const isBull = result.bias === 'ALCISTA';
@@ -192,7 +203,7 @@ const PredictionContent = ({ result, currentPrice, onClose, onOpenPosition, lang
             <div className="flex items-center justify-between">
                 <div className="flex flex-col">
                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t.DIRECTION}</span>
-                    <span className={`text-3xl font-extrabold italic tracking-tighter ${accentColor}`}>{result.bias}</span>
+                    <span className={`text-3xl font-extrabold italic tracking-tighter ${accentColor}`}>{getPredictionBiasLabel(result.bias, lang)}</span>
                 </div>
                 <div className="text-right">
                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t.CONFIDENCE}</span>
@@ -212,16 +223,40 @@ const PredictionContent = ({ result, currentPrice, onClose, onOpenPosition, lang
                     </div>
                 </div>
             </div>
-            <div>
-                <h3 className="text-sm font-bold uppercase border-b-2 border-dashed border-gray-400 dark:border-gray-600 pb-1 mb-2">{t.ALPHA_INTEL}</h3>
-                <ul className="space-y-2">
-                    {result.reasoning.map((r, i) => (
-                        <li key={i} className="flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-300">
-                            <span className="text-green-600 dark:text-street-acid">➜</span>
-                            {translateReason(r, lang)}
-                        </li>
-                    ))}
-                </ul>
+            <div className="space-y-4">
+                <div>
+                    <h3 className="text-sm font-bold uppercase border-b-2 border-dashed border-gray-400 dark:border-gray-600 pb-1 mb-2">{t.NOW_WHAT_HAPPENING}</h3>
+                    <ul className="space-y-2">
+                        {result.nowSummary.map((r, i) => (
+                            <li key={`now-${i}`} className="flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-300">
+                                <span className="text-green-600 dark:text-street-acid">➜</span>
+                                {translateReason(r, lang)}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+                <div>
+                    <h3 className="text-sm font-bold uppercase border-b-2 border-dashed border-gray-400 dark:border-gray-600 pb-1 mb-2">{t.NEXT_WHAT_COULD_HAPPEN}</h3>
+                    <ul className="space-y-2">
+                        {result.nextScenarios.map((r, i) => (
+                            <li key={`next-${i}`} className="flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-300">
+                                <span className="text-pink-600 dark:text-street-pink">➜</span>
+                                {translateReason(r, lang)}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+                <div>
+                    <h3 className="text-sm font-bold uppercase border-b-2 border-dashed border-gray-400 dark:border-gray-600 pb-1 mb-2">{t.ALPHA_INTEL}</h3>
+                    <ul className="space-y-2">
+                        {result.reasoning.map((r, i) => (
+                            <li key={`intel-${i}`} className="flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-300">
+                                <span className="text-green-600 dark:text-street-acid">➜</span>
+                                {translateReason(r, lang)}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
             </div>
             <div className="p-4 border-2 border-black dark:border-white bg-street-cardLight dark:bg-street-cardDark rounded-xl space-y-3">
                 <div className="text-xs font-bold uppercase text-gray-600 dark:text-gray-300">{t.PROFIT_CONFIG}</div>
