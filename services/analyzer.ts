@@ -39,7 +39,19 @@ interface PerfectTradeMemory {
 const MARKET_MEMORY = new Map<string, MarketStateMemory>();
 const PERFECT_TRADE_MEMORY = new Map<string, PerfectTradeMemory>();
 const PERFECT_TRADE_STORAGE_KEY = 'quantmind_perfect_trade_memory_v1';
+const DAILY_RESET_STORAGE_KEY = 'quantmind_daily_score_reset_utc_v1';
+const DAILY_RESET_HOUR_UTC = 21;
 let perfectMemoryHydrated = false;
+
+const buildUtcMinuteKey = (ts: number): string => {
+  const date = new Date(ts);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+};
 
 const getStorage = (): Storage | null => {
   if (typeof globalThis === 'undefined' || !('localStorage' in globalThis)) return null;
@@ -79,6 +91,27 @@ const persistPerfectMemory = () => {
       return acc;
     }, {});
     storage.setItem(PERFECT_TRADE_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore quota errors
+  }
+};
+
+const resetDailyScoringIfNeeded = (nowTs: number) => {
+  const now = new Date(nowTs);
+  if (now.getUTCHours() !== DAILY_RESET_HOUR_UTC || now.getUTCMinutes() !== 0) return;
+
+  const resetMinuteKey = buildUtcMinuteKey(nowTs);
+  const storage = getStorage();
+  const lastResetMinuteKey = storage?.getItem(DAILY_RESET_STORAGE_KEY) ?? null;
+  if (lastResetMinuteKey === resetMinuteKey) return;
+
+  MARKET_MEMORY.clear();
+  PERFECT_TRADE_MEMORY.clear();
+  persistPerfectMemory();
+
+  if (!storage) return;
+  try {
+    storage.setItem(DAILY_RESET_STORAGE_KEY, resetMinuteKey);
   } catch {
     // ignore quota errors
   }
@@ -433,6 +466,8 @@ export const scoreMarket = (
   timeframe?: Timeframe,
 ): MarketAnalysis => {
   hydratePerfectMemory();
+  const nowTs = Date.now();
+  resetDailyScoringIfNeeded(nowTs);
 
   const { bullishStrength, bearishStrength, reasons, volumeRatio } = calculateForwardScores({
     symbol,
@@ -535,8 +570,7 @@ export const scoreMarket = (
     lastTs: Date.now(),
     active: false,
   };
-  const nowTs = Date.now();
-  const elapsedMs = clamp(nowTs - prevPerfect.lastTs, 1_000, 120_000);
+  const elapsedMs = clamp(Math.max(0, nowTs - prevPerfect.lastTs), 0, 120_000);
   const momentumFactor = clamp(Math.abs(momentum) * 4200, 0, 9);
   const addPerMinute = 8 + (confluenceScore / 100) * 10 + momentumFactor * 0.35;
   const decayPerMinute = 16 + (100 - confluenceScore) * 0.08;
@@ -635,6 +669,6 @@ export const scoreMarket = (
       bestKey,
       worstKey,
     },
-    timestamp: Date.now(),
+    timestamp: nowTs,
   };
 };
