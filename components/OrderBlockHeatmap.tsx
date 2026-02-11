@@ -33,19 +33,19 @@ const OrderBlockHeatmap: React.FC<OrderBlockHeatmapProps> = ({
     const span = Math.max(priceHigh - priceLow, 1e-8);
 
     const source = orderBlockLevels.filter((level) =>
-      ['demand', 'supply', 'liquidity', 'highVolume'].includes(level.type),
+      ['demand', 'supply', 'liquidity', 'highVolume', 'liquidityPool', 'sweep', 'absorption'].includes(level.type),
     );
 
     if (!source.length) return null;
 
     const mapped = source.map((level) => {
-      const side: HeatmapBand['side'] = level.type === 'supply' ? 'SHORT' : 'LONG';
+      const side: HeatmapBand['side'] = level.side ? level.side : level.type === 'supply' || level.type === 'sweep' ? 'SHORT' : 'LONG';
       const price = level.zone ? (level.zone.low + level.zone.high) / 2 : level.price;
       const zoneSize = level.zone ? level.zone.high - level.zone.low : span * 0.012;
       const edgeBias = Math.abs((price - (priceLow + span / 2)) / (span / 2));
       const base = Math.max(level.strength, 0.5);
-      const typeBoost = level.type === 'highVolume' ? 1.25 : level.type === 'liquidity' ? 1.15 : 1;
-      const intensityRaw = base * typeBoost * (1 + zoneSize / span) * (1 + clamp(edgeBias, 0, 1) * 0.65);
+      const typeBoost = level.type === 'highVolume' ? 1.25 : level.type === 'liquidity' || level.type === 'liquidityPool' ? 1.18 : level.type === 'sweep' ? 1.32 : level.type === 'absorption' ? 1.14 : 1;
+      const intensityRaw = (level.intensity ? base * (0.5 + level.intensity) : base) * typeBoost * (1 + zoneSize / span) * (1 + clamp(edgeBias, 0, 1) * 0.65);
 
       return { side, price, strength: level.strength, intensityRaw, label: level.label };
     });
@@ -85,7 +85,7 @@ const OrderBlockHeatmap: React.FC<OrderBlockHeatmapProps> = ({
   return (
     <div className="h-full w-full bg-[#020617] border-t border-white/10 text-gray-100">
       <div className="px-3 pt-2 pb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-gray-400">
-        <span>Order Block Liquidity Map</span>
+        <span>Institutional Liquidity Heatmap</span>
         <span>Red = Short • Green = Long</span>
       </div>
       <div className="h-[calc(100%-28px)] px-3 pb-3">

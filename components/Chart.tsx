@@ -68,6 +68,9 @@ const Chart: React.FC<ChartProps> = ({
       { label: 'High-volume node', color: colors.hvn },
       { label: 'Liquidity cluster', color: colors.liquidity },
       { label: 'Imbalance', color: colors.imbalance },
+      { label: 'Liquidity pool', color: '#a78bfa' },
+      { label: 'Sweep', color: '#fb7185' },
+      { label: 'Absorption', color: '#2dd4bf' },
     ],
     [colors.hvn, colors.imbalance, colors.liquidity, colors.resistance, colors.support],
   );
@@ -189,6 +192,9 @@ const Chart: React.FC<ChartProps> = ({
                 highVolume: { color: colors.hvn, dash: '2 2' },
                 liquidity: { color: colors.liquidity, dash: '1 3' },
                 imbalance: { color: colors.imbalance, dash: '6 3' },
+                liquidityPool: { color: '#a78bfa', dash: '3 2' },
+                sweep: { color: '#fb7185', dash: '2 2' },
+                absorption: { color: '#2dd4bf', dash: '4 3' },
                 demand: { color: colors.support, dash: '5 3' },
                 supply: { color: colors.resistance, dash: '5 3' },
               } as const;

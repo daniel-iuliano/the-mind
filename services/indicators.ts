@@ -247,7 +247,7 @@ export const analyzeCandles = (candles: OHLCV[]): IndicatorValues => {
   };
 };
 
-export const calculateOrderBlockLevels = (candles: OHLCV[]): OrderBlockLevel[] => {
+export const calculateOrderBlockLevels = (candles: OHLCV[], oiSeries?: number[]): OrderBlockLevel[] => {
   if (candles.length < 20) return [];
 
   const lookback = candles.slice(-120);
@@ -347,5 +347,138 @@ export const calculateOrderBlockLevels = (candles: OHLCV[]): OrderBlockLevel[] =
     });
   }
 
-  return deduped.sort((a, b) => a.price - b.price);
+  const liquidityMap = detectLiquidityHeatmapLevels(candles, oiSeries);
+  return [...deduped, ...liquidityMap]
+    .sort((a, b) => b.strength - a.strength)
+    .filter((level, idx, arr) => !arr.slice(0, idx).some((x) => x.type === level.type && Math.abs(x.price - level.price) / Math.max(level.price, 1e-8) < 0.0018))
+    .sort((a, b) => a.price - b.price);
+};
+
+
+const median = (values: number[]) => {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+};
+
+const detectLiquidityHeatmapLevels = (candles: OHLCV[], oiSeries?: number[]): OrderBlockLevel[] => {
+  if (candles.length < 18) return [];
+  const lookback = candles.slice(-160);
+  const volumes = lookback.map((c) => c.volume);
+  const volBase = Math.max(median(volumes), 1e-8);
+  const highs = lookback.map((c) => c.high);
+  const lows = lookback.map((c) => c.low);
+  const range = Math.max(Math.max(...highs) - Math.min(...lows), 1e-8);
+  const eqTolerance = range * 0.0018;
+
+  const clusters: Array<{ idx: number; price: number; side: 'SHORT' | 'LONG'; touches: number; label: string; }> = [];
+
+  for (let i = 3; i < lookback.length - 3; i++) {
+    const c = lookback[i];
+    const prev = lookback[i - 1];
+    const next = lookback[i + 1];
+    const isSwingHigh = c.high > prev.high && c.high > next.high;
+    const isSwingLow = c.low < prev.low && c.low < next.low;
+
+    if (isSwingHigh) {
+      const touches = lookback.filter((x) => Math.abs(x.high - c.high) <= eqTolerance).length;
+      if (touches >= 2) {
+        clusters.push({ idx: i, price: c.high, side: 'SHORT', touches, label: touches >= 3 ? 'Equal Highs pool' : 'Swing High liquidity' });
+      }
+    }
+
+    if (isSwingLow) {
+      const touches = lookback.filter((x) => Math.abs(x.low - c.low) <= eqTolerance).length;
+      if (touches >= 2) {
+        clusters.push({ idx: i, price: c.low, side: 'LONG', touches, label: touches >= 3 ? 'Equal Lows pool' : 'Swing Low liquidity' });
+      }
+    }
+  }
+
+  const levels: OrderBlockLevel[] = [];
+  const lastIndex = lookback.length - 1;
+  for (const cluster of clusters) {
+    const c = lookback[cluster.idx];
+    const volSpike = c.volume / volBase;
+    const oiDelta = oiSeries && oiSeries.length > cluster.idx + 1
+      ? ((oiSeries[cluster.idx] - oiSeries[Math.max(0, cluster.idx - 1)]) / Math.max(Math.abs(oiSeries[Math.max(0, cluster.idx - 1)]), 1e-8))
+      : 0;
+
+    let mitigationIdx = lastIndex;
+    for (let j = cluster.idx + 1; j < lookback.length; j++) {
+      const test = lookback[j];
+      const touched = cluster.side === 'SHORT' ? test.high >= cluster.price : test.low <= cluster.price;
+      const rejected = cluster.side === 'SHORT' ? test.close < cluster.price : test.close > cluster.price;
+      if (touched && rejected) {
+        mitigationIdx = j;
+        break;
+      }
+    }
+
+    const intensity = Math.min(1, Math.max(0.12, volSpike * 0.52 + Math.abs(oiDelta) * 6 + cluster.touches * 0.12));
+    const zonePad = Math.max(range * 0.0022, Math.abs(c.high - c.low) * 0.22);
+    levels.push({
+      type: 'liquidityPool',
+      price: cluster.price,
+      side: cluster.side,
+      intensity,
+      strength: Math.min(100, Math.round(intensity * 100)),
+      label: cluster.side === 'SHORT' ? `${cluster.label} • stops above highs` : `${cluster.label} • stops below lows`,
+      mitigated: mitigationIdx < lastIndex,
+      zone: {
+        low: cluster.price - zonePad,
+        high: cluster.price + zonePad,
+        startTime: lookback[cluster.idx].time,
+        endTime: lookback[Math.max(mitigationIdx, cluster.idx)].time,
+      },
+    });
+
+    const sweepCandle = lookback[Math.min(mitigationIdx, lastIndex)];
+    const isSweep = cluster.side === 'SHORT'
+      ? sweepCandle.high > cluster.price && sweepCandle.close < cluster.price
+      : sweepCandle.low < cluster.price && sweepCandle.close > cluster.price;
+    if (isSweep) {
+      levels.push({
+        type: 'sweep',
+        price: cluster.price,
+        side: cluster.side,
+        intensity: Math.min(1, intensity + 0.14),
+        strength: Math.min(100, Math.round(intensity * 100) + 8),
+        label: cluster.side === 'SHORT' ? 'Short-side liquidity sweep' : 'Long-side liquidity sweep',
+        zone: {
+          low: cluster.price - zonePad * 0.6,
+          high: cluster.price + zonePad * 0.6,
+          startTime: sweepCandle.time,
+          endTime: sweepCandle.time,
+        },
+      });
+    }
+  }
+
+  for (let i = 2; i < lookback.length - 1; i++) {
+    const c = lookback[i];
+    const spread = Math.max(c.high - c.low, 1e-8);
+    const body = Math.abs(c.close - c.open);
+    const wickDominance = Math.max(c.high - Math.max(c.open, c.close), Math.min(c.open, c.close) - c.low) / spread;
+    const volSpike = c.volume / volBase;
+    const lowSpreadHighVolume = spread / Math.max(c.close, 1e-8) < 0.004 && volSpike > 1.25;
+    const displacementImbalance = body / spread < 0.28 && volSpike > 1.35;
+    if (wickDominance > 0.58 && (lowSpreadHighVolume || displacementImbalance)) {
+      levels.push({
+        type: 'absorption',
+        price: (c.high + c.low) / 2,
+        side: c.close >= c.open ? 'LONG' : 'SHORT',
+        intensity: Math.min(1, volSpike * 0.45 + wickDominance * 0.4),
+        strength: Math.min(100, Math.round(volSpike * 42 + wickDominance * 38)),
+        label: 'Absorption / orderflow proxy',
+        zone: { low: c.low, high: c.high, startTime: c.time, endTime: c.time },
+      });
+    }
+  }
+
+  return levels
+    .sort((a, b) => b.strength - a.strength)
+    .filter((level, idx, arr) => !arr.slice(0, idx).some((x) => x.type === level.type && Math.abs(x.price - level.price) / Math.max(level.price, 1e-8) < 0.0018))
+    .slice(0, 24);
 };
