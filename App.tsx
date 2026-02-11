@@ -26,6 +26,17 @@ const StarIcon = ({ filled }: { filled: boolean }) => (
 const LockIcon = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
 
 type MarketState = 'VERY_ACTIVE' | 'VOLATILE' | 'CALM' | 'IDEAL_TRADING' | 'WAIT';
+type MarketRegimeState =
+  | 'NOISE_STAND_ASIDE'
+  | 'CALM_STRUCTURED'
+  | 'TREND_FOLLOW'
+  | 'TREND_EXHAUSTION'
+  | 'BREAKOUT_EXPANSION'
+  | 'MEAN_REVERSION'
+  | 'PANIC_VOLATILITY'
+  | 'LIQUIDITY_TRAP'
+  | 'BALANCED_ROTATION'
+  | 'ACCUMULATION_PHASE';
 
 const MARKET_STATE_STYLES: Record<MarketState, string> = {
   VERY_ACTIVE: 'text-orange-700 dark:text-orange-300 border-orange-500/40 bg-orange-500/10',
@@ -33,6 +44,19 @@ const MARKET_STATE_STYLES: Record<MarketState, string> = {
   CALM: 'text-blue-700 dark:text-blue-300 border-blue-500/40 bg-blue-500/10',
   IDEAL_TRADING: 'text-green-700 dark:text-green-300 border-green-500/40 bg-green-500/10',
   WAIT: 'text-gray-700 dark:text-gray-300 border-gray-500/40 bg-gray-500/10',
+};
+
+const MARKET_REGIME_STYLES: Record<MarketRegimeState, string> = {
+  NOISE_STAND_ASIDE: 'text-red-700 dark:text-red-300 border-red-500/40 bg-red-500/10',
+  CALM_STRUCTURED: 'text-blue-700 dark:text-blue-300 border-blue-500/40 bg-blue-500/10',
+  TREND_FOLLOW: 'text-emerald-700 dark:text-emerald-300 border-emerald-500/40 bg-emerald-500/10',
+  TREND_EXHAUSTION: 'text-amber-700 dark:text-amber-300 border-amber-500/40 bg-amber-500/10',
+  BREAKOUT_EXPANSION: 'text-violet-700 dark:text-violet-300 border-violet-500/40 bg-violet-500/10',
+  MEAN_REVERSION: 'text-indigo-700 dark:text-indigo-300 border-indigo-500/40 bg-indigo-500/10',
+  PANIC_VOLATILITY: 'text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-500/40 bg-fuchsia-500/10',
+  LIQUIDITY_TRAP: 'text-orange-700 dark:text-orange-300 border-orange-500/40 bg-orange-500/10',
+  BALANCED_ROTATION: 'text-gray-700 dark:text-gray-300 border-gray-500/40 bg-gray-500/10',
+  ACCUMULATION_PHASE: 'text-cyan-700 dark:text-cyan-300 border-cyan-500/40 bg-cyan-500/10',
 };
 
 // --- BRAIN LOADER COMPONENT ---
@@ -686,16 +710,74 @@ export default function App() {
 
   const marketStatusSummary = useMemo(() => {
       if (displayMarketData.length === 0) return null;
+
+      const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+      const ratio = (value: number, base: number) => (base > 0 ? value / base : 1);
+
       const changes = displayMarketData.map((item) => item.change24h);
+      const absChanges = changes.map((change) => Math.abs(change));
       const volumes = displayMarketData.map((item) => item.volume24h).filter((v) => Number.isFinite(v) && v > 0);
-      const avgAbsChange = changes.reduce((sum, change) => sum + Math.abs(change), 0) / changes.length;
+      const scores = displayMarketData.map((item) => item.score);
+      const buyCount = displayMarketData.filter((item) => item.bias.includes('BUY')).length;
+      const sellCount = displayMarketData.filter((item) => item.bias.includes('SELL')).length;
+      const bullishConditionCount = displayMarketData.filter((item) => item.marketCondition === 'BULLISH').length;
+      const bearishConditionCount = displayMarketData.filter((item) => item.marketCondition === 'BEARISH').length;
+
+      const avgAbsChange = absChanges.reduce((sum, change) => sum + change, 0) / absChanges.length;
       const meanChange = changes.reduce((sum, change) => sum + change, 0) / changes.length;
       const volatility = Math.sqrt(changes.reduce((sum, change) => sum + Math.pow(change - meanChange, 2), 0) / changes.length);
-      const avgScore = displayMarketData.reduce((sum, item) => sum + item.score, 0) / displayMarketData.length;
+      const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+
       const sortedVolumes = [...volumes].sort((a, b) => a - b);
       const medianVolume = sortedVolumes.length > 0 ? sortedVolumes[Math.floor(sortedVolumes.length / 2)] : 1;
       const avgVolume = volumes.length > 0 ? volumes.reduce((sum, vol) => sum + vol, 0) / volumes.length : 1;
-      const volumeIntensity = medianVolume > 0 ? avgVolume / medianVolume : 1;
+      const volumeIntensity = ratio(avgVolume, medianVolume);
+
+      const atrValues = displayMarketData.map((item) => (item.price > 0 ? item.indicators.atr / item.price : 0)).filter((value) => Number.isFinite(value));
+      const atrMean = atrValues.length > 0 ? atrValues.reduce((sum, val) => sum + val, 0) / atrValues.length : 0;
+
+      const bbPositions = displayMarketData.map((item) => {
+        const bbRange = Math.max(item.indicators.bb.upper - item.indicators.bb.lower, item.price * 0.0025);
+        return clamp((item.price - item.indicators.bb.lower) / bbRange, 0, 1);
+      });
+      const liquidityEdgePressure = bbPositions.reduce((sum, pos) => sum + (pos <= 0.2 || pos >= 0.8 ? 1 : 0), 0) / bbPositions.length;
+      const liquidityCenterBalance = bbPositions.reduce((sum, pos) => sum + (pos >= 0.35 && pos <= 0.65 ? 1 : 0), 0) / bbPositions.length;
+
+      const trendAlignmentStrength = displayMarketData.reduce((sum, item) => {
+        const slopeFast = item.price > 0 ? (item.indicators.ema20 - item.indicators.ema50) / item.price : 0;
+        const slopeSlow = item.price > 0 ? (item.indicators.ema50 - item.indicators.ema200) / item.price : 0;
+        const sameDirection = Math.sign(slopeFast) !== 0 && Math.sign(slopeFast) === Math.sign(slopeSlow);
+        return sum + (sameDirection ? Math.min(1, Math.abs(slopeFast) * 280 + Math.abs(slopeSlow) * 220) : 0);
+      }, 0) / displayMarketData.length;
+
+      const marketBreadth = ratio(buyCount - sellCount, displayMarketData.length);
+      const conditionBreadth = ratio(bullishConditionCount - bearishConditionCount, displayMarketData.length);
+      const breadthConsensus = (marketBreadth + conditionBreadth) / 2;
+
+      const hotTrendShare = displayMarketData.reduce((sum, item) => {
+        const slopeFast = item.price > 0 ? (item.indicators.ema20 - item.indicators.ema50) / item.price : 0;
+        const slopeSlow = item.price > 0 ? (item.indicators.ema50 - item.indicators.ema200) / item.price : 0;
+        const momentum = item.indicators.macd.histogram;
+        const volumeSupport = avgVolume > 0 ? item.volume24h / avgVolume : 1;
+        const trendReady = Math.abs(slopeFast) > 0.002 && Math.abs(slopeSlow) > 0.003 && Math.sign(slopeFast) === Math.sign(momentum);
+        return sum + (trendReady && volumeSupport > 0.95 ? 1 : 0);
+      }, 0) / displayMarketData.length;
+
+      const exhaustionShare = displayMarketData.reduce((sum, item) => {
+        const rsiExtreme = item.indicators.rsi > 72 || item.indicators.rsi < 28;
+        const stretchedMove = Math.abs(item.change24h) > 4.5;
+        const weakMomentum = Math.sign(item.indicators.macd.histogram) !== Math.sign(item.change24h);
+        return sum + (rsiExtreme && stretchedMove && weakMomentum ? 1 : 0);
+      }, 0) / displayMarketData.length;
+
+      const squeezeShare = displayMarketData.reduce((sum, item) => {
+        const bbRangePct = item.price > 0 ? (item.indicators.bb.upper - item.indicators.bb.lower) / item.price : 0;
+        return sum + (bbRangePct < 0.018 ? 1 : 0);
+      }, 0) / displayMarketData.length;
+
+      const noiseScore = clamp(volatility / 6.5 + atrMean * 42 + liquidityEdgePressure * 0.6 - hotTrendShare * 0.35, 0, 3);
+      const trendScore = clamp(trendAlignmentStrength * 1.2 + hotTrendShare + Math.abs(breadthConsensus) * 0.9 + (volumeIntensity - 1), 0, 4);
+      const meanReversionScore = clamp(liquidityCenterBalance + squeezeShare * 1.1 + (1 - Math.abs(breadthConsensus)) * 0.8 - atrMean * 20, 0, 4);
 
       let state: MarketState = 'WAIT';
       if (volatility >= 5 || avgAbsChange >= 6) {
@@ -708,11 +790,69 @@ export default function App() {
         state = 'CALM';
       }
 
+      let regimeState: MarketRegimeState = 'BALANCED_ROTATION';
+      let conclusionKey = 'MARKET_REGIME_MSG_BALANCED_ROTATION';
+
+      if (noiseScore > 2.1 && trendScore < 1.8) {
+        regimeState = 'NOISE_STAND_ASIDE';
+        conclusionKey = 'MARKET_REGIME_MSG_NOISE_STAND_ASIDE';
+      } else if (volatility > 6 || atrMean > 0.032) {
+        regimeState = 'PANIC_VOLATILITY';
+        conclusionKey = 'MARKET_REGIME_MSG_PANIC_VOLATILITY';
+      } else if (trendScore >= 2.45 && volumeIntensity >= 1.18 && Math.abs(breadthConsensus) >= 0.22) {
+        regimeState = 'TREND_FOLLOW';
+        conclusionKey = 'MARKET_REGIME_MSG_TREND_FOLLOW';
+      } else if (hotTrendShare >= 0.34 && exhaustionShare >= 0.22 && avgAbsChange >= 2.8) {
+        regimeState = 'TREND_EXHAUSTION';
+        conclusionKey = 'MARKET_REGIME_MSG_TREND_EXHAUSTION';
+      } else if (squeezeShare >= 0.48 && volumeIntensity >= 1.22 && avgAbsChange >= 1.8) {
+        regimeState = 'BREAKOUT_EXPANSION';
+        conclusionKey = 'MARKET_REGIME_MSG_BREAKOUT_EXPANSION';
+      } else if (meanReversionScore >= 2.2 && Math.abs(breadthConsensus) < 0.2 && avgAbsChange <= 2.4) {
+        regimeState = 'MEAN_REVERSION';
+        conclusionKey = 'MARKET_REGIME_MSG_MEAN_REVERSION';
+      } else if (liquidityEdgePressure >= 0.5 && Math.abs(breadthConsensus) < 0.15 && volatility >= 2.5) {
+        regimeState = 'LIQUIDITY_TRAP';
+        conclusionKey = 'MARKET_REGIME_MSG_LIQUIDITY_TRAP';
+      } else if (volatility <= 1.35 && atrMean <= 0.012 && trendAlignmentStrength >= 0.36) {
+        regimeState = 'CALM_STRUCTURED';
+        conclusionKey = 'MARKET_REGIME_MSG_CALM_STRUCTURED';
+      } else if (avgAbsChange <= 1.6 && volumeIntensity < 1.1 && trendAlignmentStrength < 0.25 && squeezeShare >= 0.35) {
+        regimeState = 'ACCUMULATION_PHASE';
+        conclusionKey = 'MARKET_REGIME_MSG_ACCUMULATION_PHASE';
+      }
+
+      const diagnostics = [
+        {
+          labelKey: 'MARKET_PANEL_BREADTH',
+          value: `${(breadthConsensus * 100).toFixed(0)}%`,
+          detail: buyCount >= sellCount ? 'MARKET_PANEL_BREADTH_BUY' : 'MARKET_PANEL_BREADTH_SELL',
+        },
+        {
+          labelKey: 'MARKET_PANEL_TREND',
+          value: `${(trendAlignmentStrength * 100).toFixed(0)}%`,
+          detail: trendAlignmentStrength >= 0.45 ? 'MARKET_PANEL_TREND_ALIGNED' : 'MARKET_PANEL_TREND_FRAGMENTED',
+        },
+        {
+          labelKey: 'MARKET_PANEL_ORDERFLOW',
+          value: `${(liquidityEdgePressure * 100).toFixed(0)}%`,
+          detail: liquidityEdgePressure >= 0.45 ? 'MARKET_PANEL_ORDERFLOW_EDGE' : 'MARKET_PANEL_ORDERFLOW_BALANCED',
+        },
+        {
+          labelKey: 'MARKET_PANEL_VOLUME',
+          value: `x${volumeIntensity.toFixed(2)}`,
+          detail: volumeIntensity >= 1.2 ? 'MARKET_PANEL_VOLUME_EXPANSION' : 'MARKET_PANEL_VOLUME_NORMAL',
+        },
+      ];
+
       return {
         state,
         avgAbsChange,
         volatility,
         volumeIntensity,
+        regimeState,
+        conclusionKey,
+        diagnostics,
       };
   }, [displayMarketData]);
 
@@ -760,39 +900,54 @@ export default function App() {
                <FilterButton label={t.FILTER_BEAR} active={filter === 'BEAR'} type="bear" onClick={() => handleFilterChange('BEAR')} />
            </div>
            {marketStatusSummary && (
-            <div className="mt-3 p-2 border-2 border-black/20 dark:border-white/20 rounded-lg bg-street-cardLight dark:bg-street-cardDark">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">{t.MARKET_STATUS}</span>
-                <span className={`text-[10px] px-2 py-1 rounded-full border font-extrabold uppercase tracking-wide ${MARKET_STATE_STYLES[marketStatusSummary.state]}`}>
-                  {t[`MARKET_STATE_${marketStatusSummary.state}` as keyof typeof t]}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-[10px] font-bold uppercase">
-                <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
-                  <div className="text-gray-500 dark:text-gray-400">{t.MARKET_MOVE}</div>
-                  <div className="text-gray-800 dark:text-gray-100">{marketStatusSummary.avgAbsChange.toFixed(2)}%</div>
+            <>
+              <div className="mt-3 p-2 border-2 border-black/20 dark:border-white/20 rounded-lg bg-street-cardLight dark:bg-street-cardDark">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">{t.MARKET_STATUS}</span>
+                  <span className={`text-[10px] px-2 py-1 rounded-full border font-extrabold uppercase tracking-wide ${MARKET_STATE_STYLES[marketStatusSummary.state]}`}>
+                    {t[`MARKET_STATE_${marketStatusSummary.state}` as keyof typeof t]}
+                  </span>
                 </div>
-                <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
-                  <div className="text-gray-500 dark:text-gray-400">{t.MARKET_VOLATILITY}</div>
-                  <div className="text-gray-800 dark:text-gray-100">{marketStatusSummary.volatility.toFixed(2)}</div>
-                </div>
-                <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
-                  <div className="text-gray-500 dark:text-gray-400">{t.MARKET_VOLUME}</div>
-                  <div className="text-gray-800 dark:text-gray-100">x{marketStatusSummary.volumeIntensity.toFixed(2)}</div>
-                </div>
-              </div>
-            </div>
-           )}
-           <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="flex items-center justify-between p-2 border-2 border-street-purple/50 bg-street-purple/10 rounded-lg">
-                  <div>
-                      <span className="text-[10px] font-bold uppercase text-street-purple block">{t.PREDICT_MODE}</span>
-                      <span className="text-[9px] font-medium text-gray-600 dark:text-gray-400">{t.MODE_ALWAYS_ON}</span>
+                <div className="grid grid-cols-3 gap-2 text-[10px] font-bold uppercase">
+                  <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
+                    <div className="text-gray-500 dark:text-gray-400">{t.MARKET_MOVE}</div>
+                    <div className="text-gray-800 dark:text-gray-100">{marketStatusSummary.avgAbsChange.toFixed(2)}%</div>
                   </div>
-                  <button onClick={togglePredictMode} className={`w-12 h-7 rounded-full border-2 border-black dark:border-white transition-colors relative ${alertConfig.predictMode ? 'bg-street-purple' : 'bg-gray-400'}`}>
-                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-black border border-white transition-transform ${alertConfig.predictMode ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
+                  <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
+                    <div className="text-gray-500 dark:text-gray-400">{t.MARKET_VOLATILITY}</div>
+                    <div className="text-gray-800 dark:text-gray-100">{marketStatusSummary.volatility.toFixed(2)}</div>
+                  </div>
+                  <div className="border border-black/20 dark:border-white/20 rounded p-1.5">
+                    <div className="text-gray-500 dark:text-gray-400">{t.MARKET_VOLUME}</div>
+                    <div className="text-gray-800 dark:text-gray-100">x{marketStatusSummary.volumeIntensity.toFixed(2)}</div>
+                  </div>
+                </div>
               </div>
+              <div className="mt-2 p-3 border-2 border-black/20 dark:border-white/20 rounded-lg bg-street-cardLight dark:bg-street-cardDark space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">{t.MARKET_PANEL_TITLE}</span>
+                  <span className={`text-[10px] px-2 py-1 rounded-full border font-extrabold uppercase tracking-wide ${MARKET_REGIME_STYLES[marketStatusSummary.regimeState]}`}>
+                    {t[`MARKET_REGIME_${marketStatusSummary.regimeState}` as keyof typeof t]}
+                  </span>
+                </div>
+                <div className="p-2 border border-black/20 dark:border-white/20 rounded-lg bg-black/[0.03] dark:bg-white/[0.02]">
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-gray-900 dark:text-gray-100">
+                    {t[marketStatusSummary.conclusionKey as keyof typeof t]}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-bold uppercase">
+                  {marketStatusSummary.diagnostics.map((diag) => (
+                    <div key={diag.labelKey} className="border border-black/20 dark:border-white/20 rounded p-1.5">
+                      <div className="text-gray-500 dark:text-gray-400">{t[diag.labelKey as keyof typeof t]}</div>
+                      <div className="text-gray-800 dark:text-gray-100 text-xs">{diag.value}</div>
+                      <div className="text-[9px] text-gray-500 dark:text-gray-400">{t[diag.detail as keyof typeof t]}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+           )}
+           <div className="mt-3 grid grid-cols-1 gap-2">
               <div className="flex items-center justify-between p-2 border-2 border-street-pink/50 bg-street-pink/10 rounded-lg">
                   <div>
                       <span className="text-[10px] font-bold uppercase text-street-pink block">{t.OPPOSITE_MODE}</span>
