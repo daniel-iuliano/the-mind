@@ -114,5 +114,19 @@ export interface PredictionResult {
   nowSummary: string[];
   nextScenarios: string[];
   riskLevel: 'BAJO' | 'MEDIO' | 'ALTO';
+  validation: {
+    passed: boolean;
+    confluenceScore: number;
+    confirmations: number;
+    threshold: number;
+  };
+  auditTrail: Array<{
+    factor: string;
+    score: number;
+    weight: number;
+    contribution: number;
+    direction: 'BULL' | 'BEAR' | 'NEUTRAL';
+    details: string;
+  }>;
   timestamp: number;
 }
