@@ -6,8 +6,9 @@ type Direction = 'BULL' | 'BEAR' | 'NEUTRAL';
 
 const MIN_RR = 3;
 const MIN_CONFIRMATIONS = 4;
-const CONFLUENCE_THRESHOLD = 60;
+const CONFLUENCE_THRESHOLD = 66;
 const DIRECTIONAL_EDGE_THRESHOLD = 10;
+const EXTREME_IMBALANCE_THRESHOLD = 65;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -43,6 +44,8 @@ interface OrderBlockInsights {
   structuralPressure: number;
   demandBias: number;
   supplyBias: number;
+  dominantSide: 'BULL' | 'BEAR' | 'NEUTRAL';
+  dominanceStrength: number;
 }
 
 interface WeightedFactor {
@@ -89,14 +92,26 @@ const inferOrderBlockInsights = (
     100,
   );
 
+  const demandBias = clamp(netFlow, 0, 100);
+  const supplyBias = clamp(-netFlow, 0, 100);
+  const directionalPressure = demandBias - supplyBias;
+  const dominantSide = directionalPressure > 8 ? 'BULL' : directionalPressure < -8 ? 'BEAR' : 'NEUTRAL';
+  const dominanceStrength = clamp(
+    Math.max(Math.abs(directionalPressure), positioningImbalance * 0.86, liquidityClusters * 0.72),
+    0,
+    100,
+  );
+
   return {
     volumeDistribution,
     positioningImbalance,
     liquidityClusters,
     highVolumeZones,
     structuralPressure,
-    demandBias: clamp(netFlow, 0, 100),
-    supplyBias: clamp(-netFlow, 0, 100),
+    demandBias,
+    supplyBias,
+    dominantSide,
+    dominanceStrength,
   };
 };
 
@@ -455,14 +470,15 @@ export const generatePrediction = (
 
   const orderBlockDirectionalEdge = orderBlockInsights.demandBias - orderBlockInsights.supplyBias;
   const orderBlockSignal = {
-    score: clamp(50 + Math.abs(orderBlockDirectionalEdge) * 0.45, 45, 95),
+    score: clamp(54 + Math.abs(orderBlockDirectionalEdge) * 0.6 + orderBlockInsights.dominanceStrength * 0.12, 48, 98),
     direction: orderBlockDirectionalEdge > 6 ? 'BULL' as Direction : orderBlockDirectionalEdge < -6 ? 'BEAR' as Direction : 'NEUTRAL' as Direction,
-    details: `Order block pressure D:${orderBlockInsights.demandBias.toFixed(1)} / S:${orderBlockInsights.supplyBias.toFixed(1)}`,
+    details: `Order block pressure D:${orderBlockInsights.demandBias.toFixed(1)} / S:${orderBlockInsights.supplyBias.toFixed(1)} dom:${orderBlockInsights.dominanceStrength.toFixed(1)}`,
     reasons: [
       'OB_VOLUME_DISTRIBUTION_ACTIVE',
       'OB_POSITIONING_IMBALANCE_VISIBLE',
       'OB_LIQUIDITY_CLUSTERS_NEAR_PRICE',
       'OB_SUPPLY_DEMAND_STRUCTURE_ACTIVE',
+      'OB_DOMINANCE_PRIORITY',
     ],
   };
 
@@ -475,16 +491,16 @@ export const generatePrediction = (
   };
 
   const factors: WeightedFactor[] = [
-    { factor: 'trend_structure', score: trendSignal.score, weight: 0.2, contribution: 0, direction: trendSignal.direction, details: trendSignal.details },
-    { factor: 'candlestick_patterns', score: candleSignal.score, weight: 0.16, contribution: 0, direction: candleSignal.direction, details: candleSignal.details },
-    { factor: 'momentum_confirmation', score: momentumSignal.score, weight: 0.14, contribution: 0, direction: momentumSignal.direction, details: momentumSignal.details },
-    { factor: 'order_block_logic', score: orderBlockSignal.score, weight: 0.18, contribution: 0, direction: orderBlockSignal.direction, details: orderBlockSignal.details },
-    { factor: 'volume_profile', score: volumeProfileSignal.score, weight: 0.14, contribution: 0, direction: volumeProfileSignal.direction, details: volumeProfileSignal.details },
+    { factor: 'trend_structure', score: trendSignal.score, weight: 0.14, contribution: 0, direction: trendSignal.direction, details: trendSignal.details },
+    { factor: 'candlestick_patterns', score: candleSignal.score, weight: 0.1, contribution: 0, direction: candleSignal.direction, details: candleSignal.details },
+    { factor: 'momentum_confirmation', score: momentumSignal.score, weight: 0.1, contribution: 0, direction: momentumSignal.direction, details: momentumSignal.details },
+    { factor: 'order_block_logic', score: orderBlockSignal.score, weight: 0.34, contribution: 0, direction: orderBlockSignal.direction, details: orderBlockSignal.details },
+    { factor: 'volume_profile', score: volumeProfileSignal.score, weight: 0.12, contribution: 0, direction: volumeProfileSignal.direction, details: volumeProfileSignal.details },
     { factor: 'volatility_regime', score: volatilitySignal.score, weight: 0.08, contribution: 0, direction: volatilitySignal.direction, details: volatilitySignal.details },
     {
       factor: 'statistical_confidence',
       score: clamp(45 + Math.abs(analysis.score - 50) * 0.9 + Math.abs(orderBookImbalance ?? 0) * 30, 40, 95),
-      weight: 0.1,
+      weight: 0.12,
       contribution: 0,
       direction: structuralBaseDirection,
       details: `Weighted score:${Math.round(analysis.score)} orderbook:${(orderBookImbalance ?? 0).toFixed(3)}`,
@@ -509,14 +525,35 @@ export const generatePrediction = (
   if (directionalEdge >= DIRECTIONAL_EDGE_THRESHOLD) finalDirection = 'BULL';
   if (directionalEdge <= -DIRECTIONAL_EDGE_THRESHOLD) finalDirection = 'BEAR';
 
+  const extremeLiquidityImbalance = orderBlockInsights.dominanceStrength >= EXTREME_IMBALANCE_THRESHOLD;
+  const contradictionDetected =
+    finalDirection !== 'NEUTRAL' &&
+    orderBlockInsights.dominantSide !== 'NEUTRAL' &&
+    finalDirection !== orderBlockInsights.dominantSide &&
+    extremeLiquidityImbalance;
+
+  if (contradictionDetected) {
+    finalDirection = 'NEUTRAL';
+  }
+
   const candidateLevels = calculateLevelCandidates(analysis, levels);
   let predictionBias = directionToBias(finalDirection);
   const { targetPrice, stopLoss, rr } = findBestRiskPlan(predictionBias, currentPrice, candidateLevels, regime);
 
+  const minConfirmations = contradictionDetected ? MIN_CONFIRMATIONS + 2 : MIN_CONFIRMATIONS;
+  const minConfluenceThreshold = contradictionDetected ? CONFLUENCE_THRESHOLD + 8 : CONFLUENCE_THRESHOLD;
+  const orderBlockDirectionAligned =
+    finalDirection === 'NEUTRAL'
+      ? false
+      : orderBlockInsights.dominantSide === 'NEUTRAL'
+        ? orderBlockSignal.direction === finalDirection
+        : orderBlockInsights.dominantSide === finalDirection;
+
   const validationPassed =
     finalDirection !== 'NEUTRAL' &&
-    confirmations >= MIN_CONFIRMATIONS &&
-    confluenceScore >= CONFLUENCE_THRESHOLD &&
+    confirmations >= minConfirmations &&
+    confluenceScore >= minConfluenceThreshold &&
+    orderBlockDirectionAligned &&
     !!targetPrice &&
     !!stopLoss &&
     rr >= MIN_RR;
@@ -525,8 +562,9 @@ export const generatePrediction = (
     predictionBias = 'NEUTRAL';
   }
 
-  let probability = Math.round(clamp(40 + confluenceScore * 0.5 + Math.abs(directionalEdge) * 0.45, 40, 94));
-  if (!validationPassed) probability = Math.max(40, probability - 12);
+  let probability = Math.round(clamp(38 + confluenceScore * 0.48 + Math.abs(directionalEdge) * 0.42 + orderBlockSignal.score * 0.12, 35, 95));
+  if (!validationPassed) probability = Math.max(35, probability - 16);
+  if (contradictionDetected) probability = Math.max(30, probability - 20);
 
   const volatilityPct = currentPrice > 0 ? (atr / currentPrice) * 100 : 0;
   let riskLevel: 'BAJO' | 'MEDIO' | 'ALTO' = 'MEDIO';
@@ -546,7 +584,13 @@ export const generatePrediction = (
     if (orderBookImbalance >= 0.1) reasoning.push('ORDERBOOK_BID_DOMINANCE');
     else if (orderBookImbalance <= -0.1) reasoning.push('ORDERBOOK_ASK_DOMINANCE');
     else reasoning.push('ORDERBOOK_BALANCED');
+
+    if (orderBookImbalance >= 0.65) reasoning.push('ORDERBOOK_EXTREME_LONG_IMBALANCE');
+    if (orderBookImbalance <= -0.65) reasoning.push('ORDERBOOK_EXTREME_SHORT_IMBALANCE');
   }
+
+  if (contradictionDetected) reasoning.push('LIQUIDITY_STRUCTURE_CONTRADICTION');
+  if (!orderBlockDirectionAligned && finalDirection !== 'NEUTRAL') reasoning.push('ORDERBLOCK_DIRECTION_MISMATCH');
 
   reasoning.push(`REGIME_${regime}`);
   if (validationPassed) reasoning.push('PREDICTION_VALIDATION_PASSED');
