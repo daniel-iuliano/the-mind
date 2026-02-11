@@ -8,8 +8,9 @@ import { sendTelegramMessage, formatAlertMessage, shouldSendAlert } from './serv
 import { invertMarketAnalysis, invertPrediction } from './services/opposite';
 import { WATCHLIST, DEFAULT_TIMEFRAME } from './constants';
 import { TRANSLATIONS, REASON_CODES, translateReason, Language, getAnalyticTerm } from './services/i18n';
-import { MarketAnalysis, OHLCV, Timeframe, SupportResistanceLevel, OrderBlockLevel, AlertConfig, PredictionResult } from './types';
+import { MarketAnalysis, OHLCV, Timeframe, SupportResistanceLevel, OrderBlockLevel, AlertConfig, PredictionResult, OrderBlockVisibility } from './types';
 import Chart from './components/Chart';
+import OrderBlockHeatmap from './components/OrderBlockHeatmap';
 import { formatPrice } from './utils/formatters';
 
 // --- Icons & Assets ---
@@ -534,6 +535,12 @@ export default function App() {
   const [isScanning, setIsScanning] = useState(true);
   const [chartData, setChartData] = useState<(OHLCV & { ema20?: number, ema50?: number })[]>([]);
   const [chartMode, setChartMode] = useState<'line' | 'candles'>('line');
+  const [orderBlockVisibility, setOrderBlockVisibility] = useState<OrderBlockVisibility>({
+    demand: true,
+    supply: true,
+    liquidity: true,
+    highVolume: true,
+  });
   const [srLevels, setSrLevels] = useState<SupportResistanceLevel[]>([]);
   const [orderBlockLevels, setOrderBlockLevels] = useState<OrderBlockLevel[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
@@ -1099,9 +1106,31 @@ export default function App() {
                     {t.CANDLES}
                 </button>
             </div>
+            <div className="px-4 py-2 border-b-2 border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
+              <p className="text-[10px] font-black uppercase tracking-wide text-gray-700 dark:text-gray-200 mb-2">Order Block overlays</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { key: 'demand' as const, label: 'Buy zones (Demand)' },
+                  { key: 'supply' as const, label: 'Sell zones (Supply)' },
+                  { key: 'liquidity' as const, label: 'Liquidity clusters' },
+                  { key: 'highVolume' as const, label: 'High-volume nodes' },
+                ].map((toggle) => (
+                  <button
+                    key={toggle.key}
+                    onClick={() => setOrderBlockVisibility((prev) => ({ ...prev, [toggle.key]: !prev[toggle.key] }))}
+                    className={`px-2 py-1.5 text-[10px] font-bold uppercase rounded border-2 transition-all ${orderBlockVisibility[toggle.key] ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}
+                  >
+                    {toggle.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex-1 overflow-y-auto bg-street-light dark:bg-street-dark">
                <div className="h-[350px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
-                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} orderBlockLevels={orderBlockLevels} theme={theme} mode={chartMode} noDataLabel={t.NO_SIGNALS} />
+                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} orderBlockLevels={orderBlockLevels} theme={theme} mode={chartMode} visibility={orderBlockVisibility} noDataLabel={t.NO_SIGNALS} />
+               </div>
+               <div className="h-[320px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
+                  <OrderBlockHeatmap data={chartData} orderBlockLevels={orderBlockLevels} theme={theme} noDataLabel={t.NO_SIGNALS} />
                </div>
                <div className="grid grid-cols-3 gap-3 p-4">
                   {[

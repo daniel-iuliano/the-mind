@@ -12,7 +12,7 @@ import {
   ReferenceArea,
   Brush,
 } from 'recharts';
-import { OHLCV, SupportResistanceLevel, OrderBlockLevel } from '../types';
+import { OHLCV, SupportResistanceLevel, OrderBlockLevel, OrderBlockVisibility } from '../types';
 
 interface ChartProps {
   data: (OHLCV & { ema20?: number; ema50?: number })[];
@@ -22,6 +22,7 @@ interface ChartProps {
   theme: 'dark' | 'light';
   mode?: 'line' | 'candles';
   noDataLabel?: string;
+  visibility?: OrderBlockVisibility;
 }
 
 const Chart: React.FC<ChartProps> = ({
@@ -32,6 +33,7 @@ const Chart: React.FC<ChartProps> = ({
   theme,
   mode = 'line',
   noDataLabel = 'NO DATA',
+  visibility = { demand: true, supply: true, liquidity: true, highVolume: true },
 }) => {
   if (!data || data.length === 0) return <div className="h-full flex items-center justify-center font-bold text-xs text-gray-400">{noDataLabel}</div>;
 
@@ -72,6 +74,14 @@ const Chart: React.FC<ChartProps> = ({
 
   const latestClose = data[data.length - 1]?.close ?? 0;
 
+  const isVisibleType = (type: OrderBlockLevel['type']) => {
+    if (type === 'demand') return visibility.demand;
+    if (type === 'supply') return visibility.supply;
+    if (type === 'liquidity') return visibility.liquidity;
+    if (type === 'highVolume') return visibility.highVolume;
+    return true;
+  };
+
   return (
     <div className="w-full h-full min-h-[320px] relative">
       <div className="absolute top-4 left-4 z-10 pointer-events-none space-y-2">
@@ -81,12 +91,20 @@ const Chart: React.FC<ChartProps> = ({
           <span className="text-gray-200">{symbol}</span>
         </div>
         <div className="flex flex-wrap gap-2 text-[9px] font-bold uppercase tracking-wide bg-black/40 dark:bg-white/10 backdrop-blur px-2 py-1 rounded border border-white/20 max-w-[90vw]">
-          {orderBlockLegend.map((item) => (
-            <span key={item.label} className="inline-flex items-center gap-1 text-gray-100 dark:text-gray-200">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-              {item.label}
-            </span>
-          ))}
+          {orderBlockLegend
+            .filter((item) => {
+              if (item.label === 'Demand zone') return visibility.demand;
+              if (item.label === 'Supply zone') return visibility.supply;
+              if (item.label === 'High-volume node') return visibility.highVolume;
+              if (item.label === 'Liquidity cluster') return visibility.liquidity;
+              return true;
+            })
+            .map((item) => (
+              <span key={item.label} className="inline-flex items-center gap-1 text-gray-100 dark:text-gray-200">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                {item.label}
+              </span>
+            ))}
         </div>
       </div>
 
@@ -133,6 +151,7 @@ const Chart: React.FC<ChartProps> = ({
 
           {orderBlockLevels
             .filter((level) => !!level.zone && (level.type === 'demand' || level.type === 'supply' || level.type === 'imbalance'))
+            .filter((level) => isVisibleType(level.type))
             .map((level, i) => (
               <ReferenceArea
                 key={`ob-zone-${level.type}-${i}`}
@@ -164,6 +183,7 @@ const Chart: React.FC<ChartProps> = ({
 
           {orderBlockLevels
             .filter((l) => !l.zone || (l.type !== 'demand' && l.type !== 'supply' && l.type !== 'imbalance'))
+            .filter((level) => isVisibleType(level.type))
             .map((level, i) => {
               const mapStyle = {
                 highVolume: { color: colors.hvn, dash: '2 2' },
