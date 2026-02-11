@@ -61,7 +61,7 @@ ${colorCircle} <b>${analysis.symbol}</b>
 🧭 <b>${t.ALERT_SIGNAL}:</b> ${analysis.bias}
 💯 <b>${t.ALERT_SCORE}:</b> ${Math.round(analysis.score)}/100
 
-📊 <b>Key Data:</b>
+📊 <b>${t.ALERT_KEY_DATA}:</b>
 • ${t.ALERT_PRICE}: $${formatPrice(analysis.price)}
 • RSI: ${analysis.indicators.rsi.toFixed(1)}
 • ${t.VOL} 24h: $${(analysis.volume24h / 1000).toFixed(0)}k
@@ -75,8 +75,8 @@ ${reasonList}`;
 
 🔮 <b>${t.ALERT_PREDICT}</b>
 🎲 <b>${t.ALERT_PROB}:</b> ${prediction.probability}%
-🎯 <b>Target:</b> ${prediction.targetPrice ? '$' + formatPrice(prediction.targetPrice) : 'N/A'}
-🛑 <b>Stop Loss:</b> ${prediction.stopLoss ? '$' + formatPrice(prediction.stopLoss) : 'N/A'}
+🎯 <b>${t.ALERT_TARGET}:</b> ${prediction.targetPrice ? '$' + formatPrice(prediction.targetPrice) : t.ALERT_NA}
+🛑 <b>${t.ALERT_STOP_LOSS}:</b> ${prediction.stopLoss ? '$' + formatPrice(prediction.stopLoss) : t.ALERT_NA}
 
 ⚠️ <i>${t.ALERT_OUTLOOK}</i>`;
   }
