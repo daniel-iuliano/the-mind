@@ -1,5 +1,4 @@
 import React, { useMemo } from 'react';
-import { ResponsiveContainer, ScatterChart, XAxis, YAxis, CartesianGrid, ZAxis, Scatter, Tooltip, Cell } from 'recharts';
 import { OHLCV, OrderBlockLevel } from '../types';
 
 interface OrderBlockHeatmapProps {
@@ -9,14 +8,13 @@ interface OrderBlockHeatmapProps {
   noDataLabel?: string;
 }
 
-type HeatmapPoint = {
-  x: number;
-  y: number;
-  z: number;
-  intensity: number;
+type HeatmapBand = {
+  price: number;
   side: 'LONG' | 'SHORT';
-  priceLevel: number;
-  volumeProxy: number;
+  intensity: number;
+  widthPct: number;
+  strength: number;
+  label: string;
 };
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
@@ -27,121 +25,114 @@ const OrderBlockHeatmap: React.FC<OrderBlockHeatmapProps> = ({
   theme,
   noDataLabel = 'NO DATA',
 }) => {
-  const heatmapData = useMemo<HeatmapPoint[]>(() => {
-    if (!data.length) return [];
+  const levels = useMemo(() => {
+    if (!data.length) return null;
 
     const priceLow = Math.min(...data.map((d) => d.low));
     const priceHigh = Math.max(...data.map((d) => d.high));
-    const priceSpan = Math.max(priceHigh - priceLow, 1e-8);
+    const span = Math.max(priceHigh - priceLow, 1e-8);
 
-    const blockData = orderBlockLevels
-      .filter((level) => level.type === 'demand' || level.type === 'supply' || level.type === 'liquidity' || level.type === 'highVolume')
-      .map((level) => {
-        const side: HeatmapPoint['side'] = level.type === 'supply' ? 'SHORT' : 'LONG';
-        const zoneMid = level.zone ? (level.zone.low + level.zone.high) / 2 : level.price;
-        const zoneSize = level.zone ? Math.max(level.zone.high - level.zone.low, 1e-8) : priceSpan * 0.01;
-        const normalizedPosition = clamp((zoneMid - priceLow) / priceSpan, 0, 1);
-        const edgeBias = Math.abs(normalizedPosition - 0.5) * 2;
+    const source = orderBlockLevels.filter((level) =>
+      ['demand', 'supply', 'liquidity', 'highVolume'].includes(level.type),
+    );
 
-        const volumeProxy = Math.max(level.strength, 1);
-        const imbalanceBoost = level.type === 'liquidity' ? 1.15 : level.type === 'highVolume' ? 1.25 : 1;
-        const rawIntensity = volumeProxy * imbalanceBoost * (1 + edgeBias * 0.75) * (1 + zoneSize / priceSpan);
+    if (!source.length) return null;
 
-        return {
-          x: normalizedPosition,
-          y: zoneMid,
-          z: rawIntensity,
-          intensity: rawIntensity,
-          side,
-          priceLevel: zoneMid,
-          volumeProxy,
-        };
-      });
+    const mapped = source.map((level) => {
+      const side: HeatmapBand['side'] = level.type === 'supply' ? 'SHORT' : 'LONG';
+      const price = level.zone ? (level.zone.low + level.zone.high) / 2 : level.price;
+      const zoneSize = level.zone ? level.zone.high - level.zone.low : span * 0.012;
+      const edgeBias = Math.abs((price - (priceLow + span / 2)) / (span / 2));
+      const base = Math.max(level.strength, 0.5);
+      const typeBoost = level.type === 'highVolume' ? 1.25 : level.type === 'liquidity' ? 1.15 : 1;
+      const intensityRaw = base * typeBoost * (1 + zoneSize / span) * (1 + clamp(edgeBias, 0, 1) * 0.65);
 
-    if (!blockData.length) return [];
+      return { side, price, strength: level.strength, intensityRaw, label: level.label };
+    });
 
-    const maxIntensity = Math.max(...blockData.map((d) => d.intensity), 1e-8);
+    const maxIntensity = Math.max(...mapped.map((m) => m.intensityRaw), 1e-8);
 
-    return blockData.map((point) => ({
-      ...point,
-      z: clamp(30 + (point.intensity / maxIntensity) * 250, 30, 280),
-      intensity: clamp(point.intensity / maxIntensity, 0.05, 1),
-    }));
+    const bands: HeatmapBand[] = mapped
+      .map((m) => ({
+        price: m.price,
+        side: m.side,
+        strength: m.strength,
+        label: m.label,
+        intensity: clamp(m.intensityRaw / maxIntensity, 0.08, 1),
+        widthPct: clamp(28 + (m.intensityRaw / maxIntensity) * 68, 28, 96),
+      }))
+      .sort((a, b) => b.price - a.price);
+
+    return {
+      priceLow,
+      priceHigh,
+      span,
+      bands,
+    };
   }, [data, orderBlockLevels]);
 
-  if (!data?.length || heatmapData.length === 0) {
+  if (!levels || levels.bands.length === 0) {
     return <div className="h-full flex items-center justify-center font-bold text-xs text-gray-400">{noDataLabel}</div>;
   }
 
-  const priceLow = Math.min(...data.map((d) => d.low));
-  const priceHigh = Math.max(...data.map((d) => d.high));
-  const priceSpan = Math.max(priceHigh - priceLow, 1e-8);
-  const precision = priceSpan < 1 ? 6 : priceSpan < 10 ? 4 : 2;
-
-  const axisColor = theme === 'dark' ? '#9ca3af' : '#374151';
-  const gridColor = theme === 'dark' ? '#334155' : '#e5e7eb';
-  const tooltipBg = theme === 'dark' ? '#111827' : '#ffffff';
-  const tooltipText = theme === 'dark' ? '#f8fafc' : '#0f172a';
-
-  const colorForPoint = (point: HeatmapPoint) => {
-    const alpha = clamp(0.2 + point.intensity * 0.8, 0.2, 1);
-    return point.side === 'SHORT' ? `rgba(239, 68, 68, ${alpha})` : `rgba(34, 197, 94, ${alpha})`;
-  };
+  const { priceLow, priceHigh, span, bands } = levels;
+  const precision = span < 1 ? 6 : span < 10 ? 4 : 2;
+  const axisTicks = Array.from({ length: 6 }).map((_, index) => {
+    const ratio = index / 5;
+    return priceHigh - ratio * span;
+  });
 
   return (
-    <div className="w-full h-full min-h-[280px] relative">
-      <div className="absolute top-3 left-3 z-10 text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded border border-white/20 bg-black/40 dark:bg-white/10 text-gray-100 dark:text-gray-200">
-        Liquidity Heatmap • Red = Short Liquidity • Green = Long Liquidity
+    <div className="h-full w-full bg-[#020617] border-t border-white/10 text-gray-100">
+      <div className="px-3 pt-2 pb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-gray-400">
+        <span>Order Block Liquidity Map</span>
+        <span>Red = Short • Green = Long</span>
       </div>
-      <ResponsiveContainer width="100%" height="100%" minHeight={280}>
-        <ScatterChart margin={{ top: 28, right: 18, left: 2, bottom: 14 }}>
-          <CartesianGrid stroke={gridColor} strokeDasharray="3 3" />
-          <XAxis
-            type="number"
-            dataKey="x"
-            domain={[0, 1]}
-            tickFormatter={(v) => `${Math.round(Number(v) * 100)}%`}
-            tick={{ fill: axisColor, fontSize: 10, fontWeight: 700 }}
-            stroke={axisColor}
-            label={{ value: 'Relative Price Position', position: 'insideBottom', dy: 10, fill: axisColor, fontSize: 10 }}
-          />
-          <YAxis
-            type="number"
-            dataKey="y"
-            domain={[priceLow * 0.995, priceHigh * 1.005]}
-            tickFormatter={(v) => Number(v).toFixed(precision)}
-            tick={{ fill: axisColor, fontSize: 10, fontWeight: 700 }}
-            stroke={axisColor}
-            width={70}
-            label={{ value: 'Price', angle: -90, position: 'insideLeft', fill: axisColor, fontSize: 10 }}
-          />
-          <ZAxis type="number" dataKey="z" range={[60, 360]} />
-          <Tooltip
-            cursor={{ strokeDasharray: '4 4', stroke: axisColor }}
-            contentStyle={{
-              backgroundColor: tooltipBg,
-              color: tooltipText,
-              border: '2px solid #94a3b8',
-              borderRadius: '8px',
-              fontSize: '11px',
-              fontWeight: 700,
-            }}
-            formatter={(_, __, payload) => {
-              const row = payload?.payload as HeatmapPoint;
-              return [
-                `Intensity ${(row.intensity * 100).toFixed(0)}% • Volume x${row.volumeProxy.toFixed(2)}`,
-                row.side === 'SHORT' ? 'Short liquidity zone' : 'Long liquidity zone',
-              ];
-            }}
-            labelFormatter={(label) => `Position ${(Number(label) * 100).toFixed(0)}%`}
-          />
-          <Scatter data={heatmapData}>
-            {heatmapData.map((point, idx) => (
-              <Cell key={`heatmap-cell-${idx}-${point.priceLevel}`} fill={colorForPoint(point)} />
-            ))}
-          </Scatter>
-        </ScatterChart>
-      </ResponsiveContainer>
+      <div className="h-[calc(100%-28px)] px-3 pb-3">
+        <div className="h-full rounded-md border border-white/15 bg-[#050c1a] grid grid-cols-[1fr_68px] overflow-hidden">
+          <div className="relative">
+            <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(148,163,184,0.10)_1px,transparent_1px)] bg-[length:100%_14.285%]" />
+            {bands.map((band, index) => {
+              const yPct = clamp(((priceHigh - band.price) / span) * 100, 0, 100);
+              const alpha = clamp(0.22 + band.intensity * 0.72, 0.22, 0.94);
+              const glow = band.side === 'SHORT' ? `rgba(248,113,113,${alpha})` : `rgba(74,222,128,${alpha})`;
+              const core = band.side === 'SHORT' ? `rgba(220,38,38,${alpha})` : `rgba(22,163,74,${alpha})`;
+
+              return (
+                <div
+                  key={`${band.price}-${band.side}-${index}`}
+                  className="absolute left-1/2 -translate-x-1/2 h-3 rounded-sm"
+                  style={{
+                    top: `calc(${yPct}% - 6px)`,
+                    width: `${band.widthPct}%`,
+                    background: `linear-gradient(90deg, transparent 0%, ${glow} 16%, ${core} 50%, ${glow} 84%, transparent 100%)`,
+                    boxShadow: `0 0 14px ${glow}`,
+                  }}
+                  title={`${band.side} • ${band.label} • ${band.price.toFixed(precision)} • intensity ${(band.intensity * 100).toFixed(0)}%`}
+                />
+              );
+            })}
+          </div>
+
+          <div className="relative border-l border-white/10 bg-[#020617]/80">
+            {axisTicks.map((tick) => {
+              const yPct = clamp(((priceHigh - tick) / span) * 100, 0, 100);
+              return (
+                <div
+                  key={tick}
+                  className="absolute right-2 text-[10px] font-semibold text-gray-300"
+                  style={{ top: `calc(${yPct}% - 7px)` }}
+                >
+                  {tick.toFixed(precision)}
+                </div>
+              );
+            })}
+            <div className="absolute bottom-2 right-2 text-[9px] uppercase tracking-[0.12em] text-gray-500">
+              Price Axis
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
