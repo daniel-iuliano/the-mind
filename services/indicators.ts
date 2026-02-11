@@ -1,4 +1,4 @@
-import { OHLCV, IndicatorValues, SupportResistanceLevel } from "../types";
+import { OHLCV, IndicatorValues, SupportResistanceLevel, OrderBlockLevel } from "../types";
 
 // Helper: Calculate average
 const avg = (data: number[]) => data.reduce((a, b) => a + b, 0) / data.length;
@@ -245,4 +245,107 @@ export const analyzeCandles = (candles: OHLCV[]): IndicatorValues => {
     bb: bbArr[idx] || { upper: 0, lower: 0, middle: 0 },
     atr: atrArr[idx] || 0
   };
+};
+
+export const calculateOrderBlockLevels = (candles: OHLCV[]): OrderBlockLevel[] => {
+  if (candles.length < 20) return [];
+
+  const lookback = candles.slice(-120);
+  const volumes = lookback.map((c) => c.volume);
+  const avgVolume = volumes.reduce((acc, v) => acc + v, 0) / Math.max(volumes.length, 1);
+  const sortedVolumes = [...volumes].sort((a, b) => a - b);
+  const highVolumeThreshold = sortedVolumes[Math.floor(sortedVolumes.length * 0.82)] || avgVolume;
+
+  const highs = lookback.map((c) => c.high);
+  const lows = lookback.map((c) => c.low);
+  const rangeHigh = Math.max(...highs);
+  const rangeLow = Math.min(...lows);
+  const range = Math.max(rangeHigh - rangeLow, 1e-8);
+  const latestClose = lookback[lookback.length - 1].close;
+
+  const levels: OrderBlockLevel[] = [];
+
+  for (let i = 2; i < lookback.length - 2; i++) {
+    const c = lookback[i];
+    const body = Math.abs(c.close - c.open);
+    const wick = c.high - c.low;
+    const volumeSpike = c.volume >= highVolumeThreshold;
+    const displacement = body > wick * 0.45;
+
+    if (volumeSpike && displacement) {
+      const bullish = c.close > c.open;
+      const type = bullish ? 'demand' : 'supply';
+      const zonePad = Math.max(wick * 0.15, range * 0.0035);
+      const zoneLow = Math.max(rangeLow, Math.min(c.open, c.close) - zonePad);
+      const zoneHigh = Math.min(rangeHigh, Math.max(c.open, c.close) + zonePad);
+      levels.push({
+        type,
+        price: (zoneLow + zoneHigh) / 2,
+        strength: Math.min(100, Math.round((c.volume / avgVolume) * 35 + (body / Math.max(wick, 1e-8)) * 45)),
+        label: bullish ? 'Demand OB' : 'Supply OB',
+        zone: { low: zoneLow, high: zoneHigh },
+      });
+    }
+
+    const nearRound = Math.abs((c.close / range) - Math.round(c.close / range)) < 0.005;
+    if (volumeSpike && nearRound) {
+      levels.push({
+        type: 'liquidity',
+        price: c.close,
+        strength: Math.min(100, Math.round((c.volume / avgVolume) * 40)),
+        label: 'Liquidity cluster',
+      });
+    }
+
+    if (volumeSpike) {
+      levels.push({
+        type: 'highVolume',
+        price: (c.high + c.low) / 2,
+        strength: Math.min(100, Math.round((c.volume / avgVolume) * 38)),
+        label: 'High-volume node',
+      });
+    }
+
+    const prev = lookback[i - 1];
+    const hasGapUp = c.low > prev.high * 1.0004;
+    const hasGapDown = c.high < prev.low * 0.9996;
+    if (hasGapUp || hasGapDown) {
+      const top = hasGapUp ? c.low : prev.low;
+      const bottom = hasGapUp ? prev.high : c.high;
+      levels.push({
+        type: 'imbalance',
+        price: (top + bottom) / 2,
+        strength: Math.min(100, Math.round((Math.abs(top - bottom) / range) * 3000)),
+        label: 'Imbalance',
+        zone: { low: Math.min(bottom, top), high: Math.max(bottom, top) },
+      });
+    }
+  }
+
+  const deduped = levels
+    .sort((a, b) => b.strength - a.strength)
+    .filter((level, idx, arr) => !arr.slice(0, idx).some((other) => other.type === level.type && Math.abs(other.price - level.price) / Math.max(level.price, 1e-8) < 0.0025))
+    .slice(0, 18);
+
+  const fallbackBand = range * 0.01;
+  if (!deduped.some((l) => l.type === 'demand')) {
+    deduped.push({
+      type: 'demand',
+      price: latestClose - fallbackBand,
+      strength: 50,
+      label: 'Demand OB',
+      zone: { low: latestClose - fallbackBand * 1.6, high: latestClose - fallbackBand * 0.4 },
+    });
+  }
+  if (!deduped.some((l) => l.type === 'supply')) {
+    deduped.push({
+      type: 'supply',
+      price: latestClose + fallbackBand,
+      strength: 50,
+      label: 'Supply OB',
+      zone: { low: latestClose + fallbackBand * 0.4, high: latestClose + fallbackBand * 1.6 },
+    });
+  }
+
+  return deduped.sort((a, b) => a.price - b.price);
 };

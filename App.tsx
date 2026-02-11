@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchCandles, fetchOrderBookImbalance, fetchTop30Markets, fetchTicker, getExchangeAppUrl, getExchangeUrl } from './services/coinex';
-import { analyzeCandles, calculateSupportResistance } from './services/indicators';
+import { analyzeCandles, calculateOrderBlockLevels, calculateSupportResistance } from './services/indicators';
 import { scoreMarket } from './services/analyzer';
 import { generateAIAnalysis } from './services/geminiService';
 import { generatePrediction } from './services/predictor';
@@ -8,7 +8,7 @@ import { sendTelegramMessage, formatAlertMessage, shouldSendAlert } from './serv
 import { invertMarketAnalysis, invertPrediction } from './services/opposite';
 import { WATCHLIST, DEFAULT_TIMEFRAME } from './constants';
 import { TRANSLATIONS, REASON_CODES, translateReason, Language, getAnalyticTerm } from './services/i18n';
-import { MarketAnalysis, OHLCV, Timeframe, SupportResistanceLevel, AlertConfig, PredictionResult } from './types';
+import { MarketAnalysis, OHLCV, Timeframe, SupportResistanceLevel, OrderBlockLevel, AlertConfig, PredictionResult } from './types';
 import Chart from './components/Chart';
 import { formatPrice } from './utils/formatters';
 
@@ -535,6 +535,7 @@ export default function App() {
   const [chartData, setChartData] = useState<(OHLCV & { ema20?: number, ema50?: number })[]>([]);
   const [chartMode, setChartMode] = useState<'line' | 'candles'>('line');
   const [srLevels, setSrLevels] = useState<SupportResistanceLevel[]>([]);
+  const [orderBlockLevels, setOrderBlockLevels] = useState<OrderBlockLevel[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [predictionResult, setPredictionResult] = useState<PredictionResult | null>(null);
@@ -607,7 +608,7 @@ export default function App() {
   }, [dynamicWatchlist]);
 
   const loadDetailData = async (symbol: string, tf: Timeframe) => {
-    setChartData([]); setSrLevels([]); setAiAnalysis(""); 
+    setChartData([]); setSrLevels([]); setOrderBlockLevels([]); setAiAnalysis(""); 
     try {
         const candles = await fetchCandles(symbol, tf);
         if (!candles || candles.length < 50) return;
@@ -618,6 +619,7 @@ export default function App() {
         })).slice(-80); 
         setChartData(chartWithIndicators);
         setSrLevels(calculateSupportResistance(candles));
+        setOrderBlockLevels(calculateOrderBlockLevels(candles));
     } catch (e) { console.error(e); }
   };
 
@@ -1099,7 +1101,7 @@ export default function App() {
             </div>
             <div className="flex-1 overflow-y-auto bg-street-light dark:bg-street-dark">
                <div className="h-[350px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
-                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} theme={theme} mode={chartMode} noDataLabel={t.NO_SIGNALS} />
+                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} orderBlockLevels={orderBlockLevels} theme={theme} mode={chartMode} noDataLabel={t.NO_SIGNALS} />
                </div>
                <div className="grid grid-cols-3 gap-3 p-4">
                   {[
