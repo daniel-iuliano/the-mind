@@ -18,10 +18,11 @@ interface ChartProps {
   levels?: SupportResistanceLevel[];
   theme: 'dark' | 'light';
   mode?: 'line' | 'candles';
+  noDataLabel?: string;
 }
 
-const Chart: React.FC<ChartProps> = ({ data, symbol, levels = [], theme, mode = 'line' }) => {
-  if (!data || data.length === 0) return <div className="h-full flex items-center justify-center font-bold text-xs text-gray-400">NO DATA</div>;
+const Chart: React.FC<ChartProps> = ({ data, symbol, levels = [], theme, mode = 'line', noDataLabel = 'NO DATA' }) => {
+  if (!data || data.length === 0) return <div className="h-full flex items-center justify-center font-bold text-xs text-gray-400">{noDataLabel}</div>;
 
   // Theme Colors
   const colors = {

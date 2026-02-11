@@ -7,7 +7,7 @@ import { generatePrediction } from './services/predictor';
 import { sendTelegramMessage, formatAlertMessage, shouldSendAlert } from './services/telegram';
 import { invertMarketAnalysis, invertPrediction } from './services/opposite';
 import { WATCHLIST, DEFAULT_TIMEFRAME } from './constants';
-import { TRANSLATIONS, REASON_CODES, translateReason, Language } from './services/i18n';
+import { TRANSLATIONS, REASON_CODES, translateReason, Language, getAnalyticTerm } from './services/i18n';
 import { MarketAnalysis, OHLCV, Timeframe, SupportResistanceLevel, AlertConfig, PredictionResult } from './types';
 import Chart from './components/Chart';
 import { formatPrice } from './utils/formatters';
@@ -158,9 +158,9 @@ const MarketCard = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }:
           <div className="flex items-center gap-2 mb-1">
             <button onClick={onToggleFav} className="p-1 -ml-1 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors active:scale-90"><StarIcon filled={isFavorite} /></button>
             <h3 className="text-lg font-extrabold italic tracking-tight">{data.symbol}</h3>
-            {isPerfectTrade && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-yellow-500 bg-yellow-300/80 text-black">Star Trade</span>}
-            {isBestKey && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-green-700 bg-green-300/80 text-black">Best Key</span>}
-            {isWorstKey && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-pink-700 bg-pink-300/80 text-black">Worst Key</span>}
+            {isPerfectTrade && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-yellow-500 bg-yellow-300/80 text-black">{t.STAR_TRADE}</span>}
+            {isBestKey && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-green-700 bg-green-300/80 text-black">{t.BEST_KEY}</span>}
+            {isWorstKey && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-pink-700 bg-pink-300/80 text-black">{t.WORST_KEY}</span>}
             {isLoading && <BrainLoader size="sm" />}
           </div>
           <div className="flex items-center gap-3 text-xs font-bold text-gray-600 dark:text-gray-400">
@@ -179,7 +179,7 @@ const MarketCard = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }:
           )}
           {data.perfectTrade && (
             <div className="mt-2 text-[10px] font-semibold text-gray-700 dark:text-gray-300">
-              Confluence {data.perfectTrade.confluenceScore}/100 • Robust {Math.round(data.perfectTrade.robustScore)} • RR {data.perfectTrade.rr.toFixed(2)}
+              <span className="inline-flex items-center gap-1 mr-1">{t.CONFLUENCE_SCORE} <AnalyticTermHelp term="CONFLUENCE" lang={lang} /></span> {data.perfectTrade.confluenceScore}/100 • <span className="inline-flex items-center gap-1 mr-1">{t.ROBUST_SCORE} <AnalyticTermHelp term="ROBUST" lang={lang} /></span> {Math.round(data.perfectTrade.robustScore)} • RR {data.perfectTrade.rr.toFixed(2)}
             </div>
           )}
         </div>
@@ -210,6 +210,41 @@ const ModalWrapper = ({ isOpen, onClose, title, children, color = "border-black 
             </div>
         </div>
     );
+};
+
+
+
+const AnalyticTermHelp = ({ term, lang }: { term: 'CONFLUENCE' | 'ROBUST' | 'SCORE' | 'PERFECT_TRADE', lang: Language }) => {
+  const content = getAnalyticTerm(term, lang);
+  return (
+    <span className="relative inline-flex items-center group">
+      <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] font-black rounded-full border border-current text-gray-500 dark:text-gray-400 cursor-help" aria-label={content.description}>?</span>
+      <span className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity absolute z-20 left-1/2 -translate-x-1/2 top-5 w-56 p-2 rounded-md border border-black/20 dark:border-white/20 bg-white dark:bg-street-cardDark text-[10px] normal-case font-semibold text-gray-700 dark:text-gray-200 shadow-lg">
+        <span className="block font-black uppercase mb-1">{content.label}</span>
+        <span>{content.description}</span>
+      </span>
+    </span>
+  );
+};
+
+
+const translateTemplate = (template: string, params: Record<string, string | number>): string => {
+  return Object.entries(params).reduce((acc, [key, value]) => acc.replaceAll(`{${key}}`, String(value)), template);
+};
+
+const getPerfectTradeLine = (line: string, lang: Language, perfectTrade: NonNullable<MarketAnalysis['perfectTrade']>) => {
+  const t = TRANSLATIONS[lang] as Record<string, string>;
+  const template = t[line] ?? line;
+  if (!template.includes('{')) return template;
+  return translateTemplate(template, {
+    confluence: perfectTrade.confluenceScore,
+    aligned: Math.min(8, Math.max(0, Math.round((perfectTrade.confluenceScore / 100) * 8))),
+    stability: perfectTrade.stabilityMinutes.toFixed(1),
+    robust: perfectTrade.robustScore.toFixed(1),
+    rr: perfectTrade.rr.toFixed(2),
+    sl: perfectTrade.sl ? formatPrice(perfectTrade.sl) : '---',
+    tp: perfectTrade.tp ? formatPrice(perfectTrade.tp) : '---',
+  });
 };
 
 const getPredictionBiasLabel = (bias: PredictionResult['bias'], lang: Language): string => {
@@ -315,7 +350,7 @@ const PredictionContent = ({ result, currentPrice, onClose, onOpenPosition, lang
                             <div key={`audit-${i}`} className="text-[10px] border border-black/20 dark:border-white/20 rounded p-2">
                                 <div className="font-bold uppercase text-gray-700 dark:text-gray-200">{audit.factor.replace(/_/g, ' ')}</div>
                                 <div className="text-gray-500 dark:text-gray-400">{audit.details}</div>
-                                <div className="text-gray-700 dark:text-gray-300">score: {audit.score.toFixed(1)} • weight: {audit.weight.toFixed(2)} • contribution: {audit.contribution.toFixed(2)} • {audit.direction}</div>
+                                <div className="text-gray-700 dark:text-gray-300">{t.SCORE.toLowerCase()}: {audit.score.toFixed(1)} • {t.AUDIT_WEIGHT}: {audit.weight.toFixed(2)} • {t.AUDIT_CONTRIBUTION}: {audit.contribution.toFixed(2)} • {audit.direction}</div>
                             </div>
                         ))}
                     </div>
@@ -447,13 +482,13 @@ const PositionConfirmationModal = ({ prediction, onConfirm, onCancel, lang }: { 
                          <span>{prediction.targetPrice ? `$${formatPrice(prediction.targetPrice)}` : '---'}</span>
                      </div>
                      <div className="flex justify-between">
-                         <span>STOP</span>
+                         <span>{t.STOP}</span>
                          <span className="text-street-pink">{prediction.stopLoss ? `$${formatPrice(prediction.stopLoss)}` : '---'}</span>
                      </div>
                  </div>
             </div>
             <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium leading-relaxed border-l-2 border-gray-400 pl-2">
-                <strong>DISCLAIMER:</strong> {t.DISCLAIMER}
+                <strong>{t.DISCLAIMER_LABEL}:</strong> {t.DISCLAIMER}
             </p>
             <div className="flex gap-2 pt-2">
                 <button onClick={onCancel} className="flex-1 py-3 bg-transparent text-gray-500 font-bold text-xs uppercase border-2 border-transparent hover:border-gray-300">{t.CANCEL}</button>
@@ -1056,20 +1091,20 @@ export default function App() {
             </div>
             <div className="flex gap-2 px-4 py-2 border-b-2 border-black/10 dark:border-white/10">
                 <button onClick={() => setChartMode('line')} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${chartMode === 'line' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
-                    Line
+                    {t.LINE}
                 </button>
                 <button onClick={() => setChartMode('candles')} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${chartMode === 'candles' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
-                    Candles
+                    {t.CANDLES}
                 </button>
             </div>
             <div className="flex-1 overflow-y-auto bg-street-light dark:bg-street-dark">
                <div className="h-[350px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
-                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} theme={theme} mode={chartMode} />
+                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} theme={theme} mode={chartMode} noDataLabel={t.NO_SIGNALS} />
                </div>
                <div className="grid grid-cols-3 gap-3 p-4">
                   {[
                       { l: 'RSI', v: activeMarket.indicators.rsi.toFixed(0), c: activeMarket.indicators.rsi > 70 ? 'text-pink-600 dark:text-street-pink' : activeMarket.indicators.rsi < 30 ? 'text-green-600 dark:text-street-acid' : '' },
-                      { l: t.SCORE, v: Math.round(activeMarket.score), c: 'text-street-cyan' },
+                      { l: <span className="inline-flex items-center gap-1">{t.SCORE} <AnalyticTermHelp term="SCORE" lang={lang} /></span>, v: Math.round(activeMarket.score), c: 'text-street-cyan' },
                       { l: t.VOL, v: `${(activeMarket.volume24h / 1000).toFixed(0)}k`, c: '' }
                   ].map((s, i) => (
                       <div key={i} className="bg-street-cardLight dark:bg-street-cardDark p-2 rounded-lg border-2 border-black dark:border-white text-center shadow-brutal-sm">
@@ -1108,29 +1143,29 @@ export default function App() {
                {activeMarket.perfectTrade && (
                 <div className={`mx-4 mb-4 p-4 border-2 rounded-xl relative overflow-hidden ${activeMarket.perfectTrade.active ? 'border-yellow-400 bg-yellow-100/50 dark:bg-yellow-500/10 animate-pulse' : 'border-black dark:border-white bg-transparent'}`}>
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-xs font-black uppercase tracking-wide">⭐ Perfect Trade</h3>
+                    <h3 className="text-xs font-black uppercase tracking-wide">⭐ {t.PERFECT_TRADE} <AnalyticTermHelp term="PERFECT_TRADE" lang={lang} /></h3>
                     <span className="text-[10px] font-bold uppercase text-gray-600 dark:text-gray-300">
-                      {activeMarket.perfectTrade.active ? 'Confirmed' : 'Building'}
+                      {activeMarket.perfectTrade.active ? t.PERFECT_TRADE_CONFIRMED : t.PERFECT_TRADE_BUILDING}
                     </span>
                   </div>
                   <div className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 space-y-1">
-                    <div>Confluence: {activeMarket.perfectTrade.confluenceScore}/100 • Robust: {Math.round(activeMarket.perfectTrade.robustScore)}/{activeMarket.perfectTrade.threshold}</div>
-                    <div>Stability: {activeMarket.perfectTrade.stabilityMinutes.toFixed(1)}m / {activeMarket.perfectTrade.holdMinutes.toFixed(1)}m • RR: {activeMarket.perfectTrade.rr.toFixed(2)}</div>
-                    <div>Key Levels → TP: {activeMarket.perfectTrade.tp ? `$${formatPrice(activeMarket.perfectTrade.tp)}` : '---'} • SL: {activeMarket.perfectTrade.sl ? `$${formatPrice(activeMarket.perfectTrade.sl)}` : '---'}</div>
+                    <div><span className="inline-flex items-center gap-1">{t.CONFLUENCE_SCORE}: <AnalyticTermHelp term="CONFLUENCE" lang={lang} /></span> {activeMarket.perfectTrade.confluenceScore}/100 • <span className="inline-flex items-center gap-1">{t.ROBUST_SCORE}: <AnalyticTermHelp term="ROBUST" lang={lang} /></span> {Math.round(activeMarket.perfectTrade.robustScore)}/{activeMarket.perfectTrade.threshold}</div>
+                    <div>{t.STABILITY}: {activeMarket.perfectTrade.stabilityMinutes.toFixed(1)}m / {activeMarket.perfectTrade.holdMinutes.toFixed(1)}m • RR: {activeMarket.perfectTrade.rr.toFixed(2)}</div>
+                    <div>{t.KEY_LEVELS} → TP: {activeMarket.perfectTrade.tp ? `$${formatPrice(activeMarket.perfectTrade.tp)}` : '---'} • SL: {activeMarket.perfectTrade.sl ? `$${formatPrice(activeMarket.perfectTrade.sl)}` : '---'}</div>
                   </div>
                   <div className="mt-2">
-                    <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Why it is perfect</p>
+                    <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">{t.WHY_PERFECT}</p>
                     <ul className="space-y-1">
                       {activeMarket.perfectTrade.summary.map((line, i) => (
-                        <li key={`star-sum-${i}`} className="text-[11px] text-gray-700 dark:text-gray-200">• {line}</li>
+                        <li key={`star-sum-${i}`} className="text-[11px] text-gray-700 dark:text-gray-200">• {getPerfectTradeLine(line, lang, activeMarket.perfectTrade!)}</li>
                       ))}
                     </ul>
                   </div>
                   <div className="mt-2">
-                    <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Expectations</p>
+                    <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">{t.EXPECTATIONS}</p>
                     <ul className="space-y-1">
                       {activeMarket.perfectTrade.expectations.map((line, i) => (
-                        <li key={`star-exp-${i}`} className="text-[11px] text-gray-700 dark:text-gray-200">• {line}</li>
+                        <li key={`star-exp-${i}`} className="text-[11px] text-gray-700 dark:text-gray-200">• {getPerfectTradeLine(line, lang, activeMarket.perfectTrade!)}</li>
                       ))}
                     </ul>
                   </div>

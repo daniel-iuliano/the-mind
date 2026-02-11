@@ -601,14 +601,22 @@ export const scoreMarket = (
   persistPerfectMemory();
 
   const perfectSummary = [
-    `Confluence ${confluenceScore}/100 with strict ${weightedChecks.filter((x) => x.ok).length}/8 blocks aligned.`,
-    `Stability window held for ${holdMinutes.toFixed(1)}m with robust score ${robustScore.toFixed(1)}.`,
-    `Validated structure + order block + momentum agree on ${side === 'LONG' ? 'long' : side === 'SHORT' ? 'short' : 'neutral'} continuation.`,
+    'PERFECT_SUMMARY_CONFLUENCE_ALIGNMENT',
+    'PERFECT_SUMMARY_STABILITY_ROBUST',
+    side === 'LONG'
+      ? 'PERFECT_SUMMARY_CONTINUATION_LONG'
+      : side === 'SHORT'
+        ? 'PERFECT_SUMMARY_CONTINUATION_SHORT'
+        : 'PERFECT_SUMMARY_CONTINUATION_NEUTRAL',
   ];
   const perfectExpectations = [
-    side === 'LONG' ? 'If bid pressure persists, continuation toward TP is favored.' : side === 'SHORT' ? 'If ask pressure persists, continuation toward TP is favored.' : 'No directional expectation until confluence recovers.',
-    `Risk framework: RR ${rr.toFixed(2)} with SL ${slBase.toFixed(4)} and TP ${tpBase.toFixed(4)}.`,
-    strictAligned ? 'Signal is noise-filtered by multi-minute persistence.' : 'Signal remains in build-up phase; no star trigger yet.',
+    side === 'LONG'
+      ? 'PERFECT_EXPECT_BID_PRESSURE'
+      : side === 'SHORT'
+        ? 'PERFECT_EXPECT_ASK_PRESSURE'
+        : 'PERFECT_EXPECT_NO_DIRECTION',
+    'PERFECT_EXPECT_RISK_FRAMEWORK',
+    strictAligned ? 'PERFECT_EXPECT_NOISE_FILTERED' : 'PERFECT_EXPECT_BUILDING_PHASE',
   ];
 
   const earlyLongScore = clamp(Math.round(

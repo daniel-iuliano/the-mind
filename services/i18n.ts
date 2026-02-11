@@ -85,6 +85,8 @@ export const TRANSLATIONS = {
     // Grid Stats
     SCORE: "PUNTAJE",
     VOL: "VOL",
+    LINE: "LÍNEA",
+    CANDLES: "VELAS",
 
     // Modals
     CONFIG_TITLE: "CONFIGURACIÓN",
@@ -121,6 +123,17 @@ export const TRANSLATIONS = {
     VALIDATION_PASS: "APROBADO",
     VALIDATION_FAIL: "NO APROBADO",
     CONFLUENCE_SCORE: "CONFLUENCIA",
+    ROBUST_SCORE: "ROBUSTEZ",
+    STABILITY: "ESTABILIDAD",
+    KEY_LEVELS: "NIVELES CLAVE",
+    PERFECT_TRADE: "OPERACIÓN PERFECTA",
+    PERFECT_TRADE_CONFIRMED: "CONFIRMADA",
+    PERFECT_TRADE_BUILDING: "EN FORMACIÓN",
+    WHY_PERFECT: "POR QUÉ ES PERFECTA",
+    EXPECTATIONS: "EXPECTATIVAS",
+    STAR_TRADE: "OPERACIÓN ESTRELLA",
+    BEST_KEY: "MEJOR CLAVE",
+    WORST_KEY: "CLAVE DÉBIL",
     CONFIRMATION_COUNT: "CONFIRMACIONES",
     NOW_WHAT_HAPPENING: "QUE ESTA PASANDO AHORA",
     NEXT_WHAT_COULD_HAPPEN: "QUE PODRIA PASAR DESPUES",
@@ -136,6 +149,8 @@ export const TRANSLATIONS = {
     SIDE: "LADO",
     SIDE_LONG: "COMPRA / LONG",
     SIDE_SHORT: "VENTA / SHORT",
+    STOP: "STOP",
+    DISCLAIMER_LABEL: "AVISO",
     DISCLAIMER: "The Mind no ejecuta operaciones. Serás redirigido a CoinEx para ejecutar manualmente.",
 
     // Alerts
@@ -148,6 +163,23 @@ export const TRANSLATIONS = {
     ALERT_PREDICT: "MODO PREDICT",
     ALERT_PROB: "Probabilidad",
     ALERT_OUTLOOK: "Outlook probabilístico. No es consejo financiero.",
+    ALERT_KEY_DATA: "Datos clave",
+    ALERT_TARGET: "Objetivo",
+    ALERT_STOP_LOSS: "Stop Loss",
+    ALERT_NA: "N/D",
+    AUDIT_WEIGHT: "peso",
+    AUDIT_CONTRIBUTION: "contribución",
+    PERFECT_SUMMARY_CONFLUENCE_ALIGNMENT: "Confluencia {confluence}/100 con {aligned}/8 bloques estrictos alineados.",
+    PERFECT_SUMMARY_STABILITY_ROBUST: "Ventana de estabilidad sostenida por {stability}m con robustez {robust}.",
+    PERFECT_SUMMARY_CONTINUATION_LONG: "Estructura + bloque de órdenes + momentum validan continuidad long.",
+    PERFECT_SUMMARY_CONTINUATION_SHORT: "Estructura + bloque de órdenes + momentum validan continuidad short.",
+    PERFECT_SUMMARY_CONTINUATION_NEUTRAL: "Estructura y momentum en transición neutral por ahora.",
+    PERFECT_EXPECT_BID_PRESSURE: "Si persiste la presión compradora, se favorece la continuidad hacia TP.",
+    PERFECT_EXPECT_ASK_PRESSURE: "Si persiste la presión vendedora, se favorece la continuidad hacia TP.",
+    PERFECT_EXPECT_NO_DIRECTION: "Sin expectativa direccional hasta que recupere la confluencia.",
+    PERFECT_EXPECT_RISK_FRAMEWORK: "Marco de riesgo: RR {rr} con SL {sl} y TP {tp}.",
+    PERFECT_EXPECT_NOISE_FILTERED: "Señal filtrada por ruido mediante persistencia de varios minutos.",
+    PERFECT_EXPECT_BUILDING_PHASE: "La señal sigue en fase de construcción; aún sin disparador estrella.",
   },
   EN: {
     // UI
@@ -232,6 +264,8 @@ export const TRANSLATIONS = {
     // Grid Stats
     SCORE: "SCORE",
     VOL: "VOL",
+    LINE: "LINE",
+    CANDLES: "CANDLES",
 
     // Modals
     CONFIG_TITLE: "SETTINGS",
@@ -268,6 +302,17 @@ export const TRANSLATIONS = {
     VALIDATION_PASS: "PASSED",
     VALIDATION_FAIL: "FAILED",
     CONFLUENCE_SCORE: "CONFLUENCE",
+    ROBUST_SCORE: "ROBUST",
+    STABILITY: "STABILITY",
+    KEY_LEVELS: "KEY LEVELS",
+    PERFECT_TRADE: "PERFECT TRADE",
+    PERFECT_TRADE_CONFIRMED: "CONFIRMED",
+    PERFECT_TRADE_BUILDING: "BUILDING",
+    WHY_PERFECT: "WHY IT IS PERFECT",
+    EXPECTATIONS: "EXPECTATIONS",
+    STAR_TRADE: "STAR TRADE",
+    BEST_KEY: "BEST KEY",
+    WORST_KEY: "WORST KEY",
     CONFIRMATION_COUNT: "CONFIRMATIONS",
     NOW_WHAT_HAPPENING: "WHAT IS HAPPENING NOW",
     NEXT_WHAT_COULD_HAPPEN: "WHAT COULD HAPPEN NEXT",
@@ -283,6 +328,8 @@ export const TRANSLATIONS = {
     SIDE: "SIDE",
     SIDE_LONG: "BUY / LONG",
     SIDE_SHORT: "SELL / SHORT",
+    STOP: "STOP",
+    DISCLAIMER_LABEL: "DISCLAIMER",
     DISCLAIMER: "The Mind does not execute trades. You will be redirected to CoinEx to execute manually.",
 
     // Alerts
@@ -295,7 +342,67 @@ export const TRANSLATIONS = {
     ALERT_PREDICT: "PREDICT MODE",
     ALERT_PROB: "Probability",
     ALERT_OUTLOOK: "Probabilistic outlook. Not financial advice.",
+    ALERT_KEY_DATA: "Key Data",
+    ALERT_TARGET: "Target",
+    ALERT_STOP_LOSS: "Stop Loss",
+    ALERT_NA: "N/A",
+    AUDIT_WEIGHT: "weight",
+    AUDIT_CONTRIBUTION: "contribution",
+    PERFECT_SUMMARY_CONFLUENCE_ALIGNMENT: "Confluence {confluence}/100 with strict {aligned}/8 blocks aligned.",
+    PERFECT_SUMMARY_STABILITY_ROBUST: "Stability held for {stability}m with robust score {robust}.",
+    PERFECT_SUMMARY_CONTINUATION_LONG: "Structure + order block + momentum validate long continuation.",
+    PERFECT_SUMMARY_CONTINUATION_SHORT: "Structure + order block + momentum validate short continuation.",
+    PERFECT_SUMMARY_CONTINUATION_NEUTRAL: "Structure and momentum remain in neutral transition for now.",
+    PERFECT_EXPECT_BID_PRESSURE: "If bid pressure persists, continuation toward TP is favored.",
+    PERFECT_EXPECT_ASK_PRESSURE: "If ask pressure persists, continuation toward TP is favored.",
+    PERFECT_EXPECT_NO_DIRECTION: "No directional expectation until confluence recovers.",
+    PERFECT_EXPECT_RISK_FRAMEWORK: "Risk framework: RR {rr} with SL {sl} and TP {tp}.",
+    PERFECT_EXPECT_NOISE_FILTERED: "Signal is noise-filtered by multi-minute persistence.",
+    PERFECT_EXPECT_BUILDING_PHASE: "Signal remains in build-up phase; no star trigger yet.",
   }
+};
+
+export const ANALYTIC_TERMS: Record<string, { ES: { label: string; description: string }, EN: { label: string; description: string } }> = {
+  PERFECT_TRADE: {
+    ES: {
+      label: 'Operación Perfecta',
+      description: 'Estado premium donde confluyen estructura, momentum, volumen, riesgo/beneficio y persistencia temporal en la misma dirección.',
+    },
+    EN: {
+      label: 'Perfect Trade',
+      description: 'Premium state where structure, momentum, volume, risk/reward and time persistence align in the same direction.',
+    },
+  },
+  CONFLUENCE: {
+    ES: {
+      label: 'Confluencia',
+      description: 'Puntaje que mide cuántos bloques analíticos coinciden. Cuanto mayor la confluencia, mayor coherencia de señal.',
+    },
+    EN: {
+      label: 'Confluence',
+      description: 'Score that measures how many analytic blocks agree. Higher confluence means higher signal coherence.',
+    },
+  },
+  ROBUST: {
+    ES: {
+      label: 'Robustez',
+      description: 'Mide la persistencia y resistencia de la señal en el tiempo. Sube con continuidad y cae cuando se deteriora la estructura.',
+    },
+    EN: {
+      label: 'Robust',
+      description: 'Measures signal persistence and resilience over time. It rises with continuity and drops when structure degrades.',
+    },
+  },
+  SCORE: {
+    ES: {
+      label: 'Puntaje',
+      description: 'Indicador agregado de fortaleza de condición actual (0 a 100) basado en indicadores técnicos y contexto de mercado.',
+    },
+    EN: {
+      label: 'Score',
+      description: 'Aggregate condition strength indicator (0 to 100) based on technical indicators and market context.',
+    },
+  },
 };
 
 export const REASON_CODES: Record<string, { ES: string, EN: string }> = {
@@ -422,3 +529,5 @@ export const translateReason = (code: string, lang: Language): string => {
   }
   return code; // Fallback if regular text
 };
+
+export const getAnalyticTerm = (term: keyof typeof ANALYTIC_TERMS, lang: Language) => ANALYTIC_TERMS[term][lang];
