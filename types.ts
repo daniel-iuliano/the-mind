@@ -48,6 +48,13 @@ export interface OrderBlockLevel {
   };
 }
 
+export interface OrderBlockVisibility {
+  demand: boolean;
+  supply: boolean;
+  liquidity: boolean;
+  highVolume: boolean;
+}
+
 export interface IndicatorValues {
   rsi: number;
   stochRsi: {
