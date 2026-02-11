@@ -9,6 +9,9 @@ interface OrderBlockSnapshot {
   highVolumeZonePressure: number;
   structuralDemandSupply: number;
   netBias: number;
+  dominantSide: 'LONG' | 'SHORT' | 'BALANCED';
+  dominanceStrength: number;
+  contradictionRisk: number;
 }
 
 interface PredictiveContext {
@@ -314,6 +317,15 @@ const calculateOrderBlockSnapshot = (ctx: PredictiveContext): OrderBlockSnapshot
 
   const structureBias = clamp((0.5 - bbPosition) * 120 + (0 - change24h) * 3.5, -100, 100);
   const netBias = clamp(orderFlowBias * 0.58 + structureBias * 0.42, -100, 100);
+  const dominantSide = netBias >= 18 ? 'LONG' : netBias <= -18 ? 'SHORT' : 'BALANCED';
+  const dominanceStrength = clamp(Math.max(Math.abs(netBias), positioningImbalance * 0.8, liquiditySkew * 0.72), 0, 100);
+  const contradictionRisk = clamp(
+    Math.abs(orderFlowBias - structureBias) * 0.6 +
+    (dominantSide === 'BALANCED' ? 12 : 0) +
+    Math.max(0, 40 - positioningImbalance) * 0.35,
+    0,
+    100,
+  );
 
   return {
     volumeNodeStrength,
@@ -322,6 +334,9 @@ const calculateOrderBlockSnapshot = (ctx: PredictiveContext): OrderBlockSnapshot
     highVolumeZonePressure,
     structuralDemandSupply,
     netBias,
+    dominantSide,
+    dominanceStrength,
+    contradictionRisk,
   };
 };
 
@@ -426,11 +441,34 @@ const calculateForwardScores = (ctx: PredictiveContext) => {
   if (orderBlock.volumeNodeStrength >= 55) reasons.push("ORDERBLOCK_HIGH_VOLUME_ZONE");
   if (orderBlock.positioningImbalance >= 52) reasons.push("ORDERBLOCK_POSITIONING_IMBALANCE");
   if (orderBlock.liquiditySkew >= 50) reasons.push("ORDERBLOCK_LIQUIDITY_CLUSTER");
+  if (orderBlock.dominanceStrength >= 68) reasons.push("ORDERBLOCK_DOMINANCE_HIGH");
+  if (orderBlock.contradictionRisk >= 52) reasons.push("ORDERBLOCK_STRUCTURE_CONTRADICTION");
+
+  if (orderBlock.dominantSide === 'LONG' && orderBlock.dominanceStrength >= 65) {
+    bull += 24;
+    bear -= 14;
+    reasons.push('ORDERBLOCK_LIQUIDITY_LONG_OVERRIDE');
+  }
+  if (orderBlock.dominantSide === 'SHORT' && orderBlock.dominanceStrength >= 65) {
+    bear += 24;
+    bull -= 14;
+    reasons.push('ORDERBLOCK_LIQUIDITY_SHORT_OVERRIDE');
+  }
 
   if (typeof orderBookImbalance === 'number') {
     if (orderBookImbalance > 0.12) reasons.push("ORDERBOOK_BID_DOMINANCE");
     else if (orderBookImbalance < -0.12) reasons.push("ORDERBOOK_ASK_DOMINANCE");
     else reasons.push("ORDERBOOK_BALANCED");
+
+    if (orderBookImbalance >= 0.65) {
+      bull += 34;
+      bear -= 24;
+      reasons.push('ORDERBOOK_EXTREME_LONG_IMBALANCE');
+    } else if (orderBookImbalance <= -0.65) {
+      bear += 34;
+      bull -= 24;
+      reasons.push('ORDERBOOK_EXTREME_SHORT_IMBALANCE');
+    }
   }
 
   // Volatility regime quality weighting
@@ -469,7 +507,7 @@ export const scoreMarket = (
   const nowTs = Date.now();
   resetDailyScoringIfNeeded(nowTs);
 
-  const { bullishStrength, bearishStrength, reasons, volumeRatio } = calculateForwardScores({
+  const { bullishStrength, bearishStrength, reasons, volumeRatio, orderBlock } = calculateForwardScores({
     symbol,
     price,
     indicators,
@@ -517,6 +555,19 @@ export const scoreMarket = (
     else if (conditionStrength >= 55) bias = SignalBias.SELL;
   }
 
+  const extremeLiquidityDominance = orderBlock.dominanceStrength >= 75;
+  const longDominance = orderBlock.dominantSide === 'LONG';
+  const shortDominance = orderBlock.dominantSide === 'SHORT';
+  const liquidityContradiction =
+    (marketCondition === 'BEARISH' && longDominance && extremeLiquidityDominance) ||
+    (marketCondition === 'BULLISH' && shortDominance && extremeLiquidityDominance);
+
+  if (liquidityContradiction) {
+    reasons.push('LIQUIDITY_STRUCTURE_CONTRADICTION');
+    marketCondition = 'NEUTRAL';
+    bias = SignalBias.NEUTRAL;
+  }
+
   const trendSlope = price > 0 ? (indicators.ema20 - indicators.ema50) / price : 0;
   const macroSlope = price > 0 ? (indicators.ema50 - indicators.ema200) / price : 0;
   const atrPct = price > 0 ? indicators.atr / price : 0;
@@ -530,15 +581,27 @@ export const scoreMarket = (
   const trendConfirmed = (trendSlope > 0.0022 && macroSlope > 0.0036 && strongBull) || (trendSlope < -0.0022 && macroSlope < -0.0036 && strongBear);
   const candleConfirmed = reasons.some((r) => side === 'LONG' ? r.includes('CANDLE_BULL') || r.includes('ENGULFING') || r.includes('PINBAR_BULL') : side === 'SHORT' ? r.includes('CANDLE_BEAR') || r.includes('ENGULFING') || r.includes('PINBAR_BEAR') : false);
   const orderBlockAligned = reasons.some((r) => (side === 'LONG' && r === 'ORDERBLOCK_DEMAND_DOMINANT') || (side === 'SHORT' && r === 'ORDERBLOCK_SUPPLY_DOMINANT'));
+  const orderBlockDominanceAligned = side === 'NONE'
+    ? false
+    : orderBlock.dominantSide === 'BALANCED'
+      ? orderBlockAligned
+      : orderBlock.dominantSide === side;
+  const contradictionDetected = side !== 'NONE' && orderBlock.dominantSide !== 'BALANCED' && orderBlock.dominantSide !== side && orderBlock.dominanceStrength >= 68;
   const volumeConfirmed = volumeRatio >= 1.15;
   const momentumConfirmed = (side === 'LONG' && momentum > 0 && stochUp) || (side === 'SHORT' && momentum < 0 && stochDown);
   const volatilityAligned = atrPct >= 0.007 && atrPct <= 0.028;
   const structureConfirmed = reasons.some((r) => (side === 'LONG' && (r === 'STRUCTURE_HH_HL_BULL' || r === 'STRUCTURE_CHOCH_BULL')) || (side === 'SHORT' && (r === 'STRUCTURE_LH_LL_BEAR' || r === 'STRUCTURE_CHOCH_BEAR')));
 
+  const slAtrMultiplier = contradictionDetected
+    ? 0.8
+    : orderBlockDominanceAligned && orderBlock.dominanceStrength >= 65
+      ? 1.45
+      : 1.2;
+
   const slBase = side === 'LONG'
-    ? Math.max(price - indicators.atr * 1.2, price * 0.6)
+    ? Math.max(price - indicators.atr * slAtrMultiplier, price * 0.6)
     : side === 'SHORT'
-      ? price + indicators.atr * 1.2
+      ? price + indicators.atr * slAtrMultiplier
       : price;
   const tpBase = side === 'LONG'
     ? price + indicators.atr * 3.9
@@ -551,17 +614,18 @@ export const scoreMarket = (
   const rrConfirmed = rr >= 3;
 
   const weightedChecks = [
-    { ok: trendConfirmed, weight: 18 },
-    { ok: candleConfirmed, weight: 12 },
-    { ok: orderBlockAligned, weight: 16 },
-    { ok: volumeConfirmed, weight: 10 },
-    { ok: momentumConfirmed, weight: 14 },
-    { ok: volatilityAligned, weight: 10 },
-    { ok: structureConfirmed, weight: 12 },
-    { ok: rrConfirmed, weight: 8 },
+    { ok: trendConfirmed, weight: 14 },
+    { ok: candleConfirmed, weight: 8 },
+    { ok: orderBlockAligned, weight: 18 },
+    { ok: orderBlockDominanceAligned, weight: 20 },
+    { ok: !contradictionDetected, weight: 14 },
+    { ok: volumeConfirmed, weight: 8 },
+    { ok: momentumConfirmed, weight: 8 },
+    { ok: volatilityAligned, weight: 5 },
+    { ok: structureConfirmed, weight: 5 },
   ];
   const confluenceScore = weightedChecks.reduce((acc, item) => acc + (item.ok ? item.weight : 0), 0);
-  const strictAligned = weightedChecks.every((item) => item.ok) && side !== 'NONE';
+  const strictAligned = weightedChecks.every((item) => item.ok) && side !== 'NONE' && rrConfirmed;
 
   const prevPerfect = PERFECT_TRADE_MEMORY.get(symbol) ?? {
     robustScore: 0,
@@ -578,9 +642,9 @@ export const scoreMarket = (
   const robustScore = clamp(prevPerfect.robustScore * 0.84 + deltaScore, -100, 100);
   const holdMs = strictAligned ? Math.min(prevPerfect.holdMs + elapsedMs, 45 * 60_000) : Math.max(0, prevPerfect.holdMs - elapsedMs * 1.4);
   const holdMinutes = holdMs / 60_000;
-  const threshold = 68;
+  const threshold = contradictionDetected ? 82 : 74;
   const minStabilityMinutes = 2.5;
-  const deactivateThreshold = 58;
+  const deactivateThreshold = contradictionDetected ? 70 : 64;
   const isActive = prevPerfect.active
     ? robustScore >= deactivateThreshold && holdMinutes >= minStabilityMinutes * 0.6
     : robustScore >= threshold && holdMinutes >= minStabilityMinutes && strictAligned;
