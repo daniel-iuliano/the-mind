@@ -17,9 +17,10 @@ interface ChartProps {
   symbol: string;
   levels?: SupportResistanceLevel[];
   theme: 'dark' | 'light';
+  mode?: 'line' | 'candles';
 }
 
-const Chart: React.FC<ChartProps> = ({ data, symbol, levels = [], theme }) => {
+const Chart: React.FC<ChartProps> = ({ data, symbol, levels = [], theme, mode = 'line' }) => {
   if (!data || data.length === 0) return <div className="h-full flex items-center justify-center font-bold text-xs text-gray-400">NO DATA</div>;
 
   // Theme Colors
@@ -90,15 +91,45 @@ const Chart: React.FC<ChartProps> = ({ data, symbol, levels = [], theme }) => {
              />
           ))}
 
-          <Area 
-            type="monotone" 
-            dataKey="close" 
-            stroke={colors.area} 
-            strokeWidth={2}
-            fillOpacity={1} 
-            fill="url(#colorClose)" 
-            isAnimationActive={false}
-          />
+          {mode === 'line' ? (
+            <Area 
+              type="monotone" 
+              dataKey="close" 
+              stroke={colors.area} 
+              strokeWidth={2}
+              fillOpacity={1} 
+              fill="url(#colorClose)" 
+              isAnimationActive={false}
+            />
+          ) : (
+            data.map((candle, idx) => {
+              const isBull = candle.close >= candle.open;
+              const bodyTop = Math.max(candle.open, candle.close);
+              const bodyBottom = Math.min(candle.open, candle.close);
+              return (
+                <React.Fragment key={`candle-${idx}-${candle.time}`}>
+                  <ReferenceLine
+                    segment={[
+                      { x: candle.time, y: candle.low },
+                      { x: candle.time, y: candle.high },
+                    ]}
+                    stroke={isBull ? '#22c55e' : '#ef4444'}
+                    strokeWidth={1.5}
+                    ifOverflow="extendDomain"
+                  />
+                  <ReferenceLine
+                    segment={[
+                      { x: candle.time, y: bodyBottom },
+                      { x: candle.time, y: bodyTop },
+                    ]}
+                    stroke={isBull ? '#16a34a' : '#dc2626'}
+                    strokeWidth={6}
+                    ifOverflow="extendDomain"
+                  />
+                </React.Fragment>
+              );
+            })
+          )}
           <Line type="monotone" dataKey="ema20" stroke="#22d3ee" dot={false} strokeWidth={2} isAnimationActive={false} />
           <Line type="monotone" dataKey="ema50" stroke="#facc15" dot={false} strokeWidth={2} isAnimationActive={false} />
         </ComposedChart>
