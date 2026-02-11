@@ -70,6 +70,22 @@ export interface MarketAnalysis {
   bias: SignalBias;
   reasons: string[];
   earlySignal: EarlySignal;
+  perfectTrade?: {
+    active: boolean;
+    robustScore: number;
+    confluenceScore: number;
+    threshold: number;
+    stabilityMinutes: number;
+    holdMinutes: number;
+    side: 'LONG' | 'SHORT' | 'NONE';
+    rr: number;
+    tp: number | null;
+    sl: number | null;
+    summary: string[];
+    expectations: string[];
+    bestKey: string | null;
+    worstKey: string | null;
+  };
   timestamp: number;
 }
 

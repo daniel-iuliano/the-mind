@@ -147,14 +147,20 @@ const MarketCard = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }:
   const isBear = data.bias.includes('SELL');
   const hasEarlySignal = data.earlySignal.side !== 'NEUTRAL' && data.earlySignal.confidence > 0;
   const earlyLabel = data.earlySignal.side === 'LONG' ? t.EARLY_LONG : t.EARLY_SHORT;
+  const isPerfectTrade = !!data.perfectTrade?.active;
+  const isBestKey = data.perfectTrade?.bestKey === data.symbol;
+  const isWorstKey = data.perfectTrade?.worstKey === data.symbol;
 
   return (
-    <div onClick={onClick} className={`group bg-street-cardLight dark:bg-street-cardDark rounded-xl p-4 mb-3 border-2 transition-all cursor-pointer relative overflow-hidden ${isFavorite ? 'border-yellow-400 dark:border-yellow-400 ring-1 ring-yellow-400/50' : 'border-black dark:border-white shadow-brutal active:shadow-none active:translate-x-[4px] active:translate-y-[4px]'}`}>
+    <div onClick={onClick} className={`group bg-street-cardLight dark:bg-street-cardDark rounded-xl p-4 mb-3 border-2 transition-all cursor-pointer relative overflow-hidden ${isPerfectTrade ? 'border-yellow-400 ring-2 ring-yellow-300/70 shadow-[0_0_0_2px_rgba(250,204,21,0.35)] animate-pulse' : isFavorite ? 'border-yellow-400 dark:border-yellow-400 ring-1 ring-yellow-400/50' : 'border-black dark:border-white shadow-brutal active:shadow-none active:translate-x-[4px] active:translate-y-[4px]'}`}>
       <div className="flex justify-between items-start">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             <button onClick={onToggleFav} className="p-1 -ml-1 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors active:scale-90"><StarIcon filled={isFavorite} /></button>
             <h3 className="text-lg font-extrabold italic tracking-tight">{data.symbol}</h3>
+            {isPerfectTrade && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-yellow-500 bg-yellow-300/80 text-black">Star Trade</span>}
+            {isBestKey && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-green-700 bg-green-300/80 text-black">Best Key</span>}
+            {isWorstKey && <span className="px-1.5 py-0.5 text-[9px] font-black uppercase border border-pink-700 bg-pink-300/80 text-black">Worst Key</span>}
             {isLoading && <BrainLoader size="sm" />}
           </div>
           <div className="flex items-center gap-3 text-xs font-bold text-gray-600 dark:text-gray-400">
@@ -169,6 +175,11 @@ const MarketCard = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }:
                 {earlyLabel}
               </span>
               <span>{data.earlySignal.confidence}%</span>
+            </div>
+          )}
+          {data.perfectTrade && (
+            <div className="mt-2 text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+              Confluence {data.perfectTrade.confluenceScore}/100 • Robust {Math.round(data.perfectTrade.robustScore)} • RR {data.perfectTrade.rr.toFixed(2)}
             </div>
           )}
         </div>
@@ -1094,6 +1105,37 @@ export default function App() {
                     </div>
                   )}
                </div>
+               {activeMarket.perfectTrade && (
+                <div className={`mx-4 mb-4 p-4 border-2 rounded-xl relative overflow-hidden ${activeMarket.perfectTrade.active ? 'border-yellow-400 bg-yellow-100/50 dark:bg-yellow-500/10 animate-pulse' : 'border-black dark:border-white bg-transparent'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-black uppercase tracking-wide">⭐ Perfect Trade</h3>
+                    <span className="text-[10px] font-bold uppercase text-gray-600 dark:text-gray-300">
+                      {activeMarket.perfectTrade.active ? 'Confirmed' : 'Building'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 space-y-1">
+                    <div>Confluence: {activeMarket.perfectTrade.confluenceScore}/100 • Robust: {Math.round(activeMarket.perfectTrade.robustScore)}/{activeMarket.perfectTrade.threshold}</div>
+                    <div>Stability: {activeMarket.perfectTrade.stabilityMinutes.toFixed(1)}m / {activeMarket.perfectTrade.holdMinutes.toFixed(1)}m • RR: {activeMarket.perfectTrade.rr.toFixed(2)}</div>
+                    <div>Key Levels → TP: {activeMarket.perfectTrade.tp ? `$${formatPrice(activeMarket.perfectTrade.tp)}` : '---'} • SL: {activeMarket.perfectTrade.sl ? `$${formatPrice(activeMarket.perfectTrade.sl)}` : '---'}</div>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Why it is perfect</p>
+                    <ul className="space-y-1">
+                      {activeMarket.perfectTrade.summary.map((line, i) => (
+                        <li key={`star-sum-${i}`} className="text-[11px] text-gray-700 dark:text-gray-200">• {line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 mb-1">Expectations</p>
+                    <ul className="space-y-1">
+                      {activeMarket.perfectTrade.expectations.map((line, i) => (
+                        <li key={`star-exp-${i}`} className="text-[11px] text-gray-700 dark:text-gray-200">• {line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+               )}
                <div className="mx-4 mb-8 p-4 border-2 border-black dark:border-white bg-gradient-to-br from-street-acid/20 to-transparent rounded-xl shadow-brutal relative overflow-hidden">
                    <div className="flex justify-between items-start mb-2 relative z-10"><h3 className="font-bold text-sm uppercase flex items-center gap-2">🤖 {t.AI_ANALYSIS}</h3></div>
                    {!aiAnalysis && !isAnalyzing && (
