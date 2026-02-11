@@ -281,6 +281,34 @@ const PredictionContent = ({ result, currentPrice, onClose, onOpenPosition, lang
                         ))}
                     </ul>
                 </div>
+                <div>
+                    <h3 className="text-sm font-bold uppercase border-b-2 border-dashed border-gray-400 dark:border-gray-600 pb-1 mb-2">{t.PREDICTION_VALIDATION}</h3>
+                    <div className="grid grid-cols-2 gap-2 text-[10px] font-bold uppercase">
+                        <div className="border border-black/20 dark:border-white/20 rounded p-2">
+                            <div className="text-gray-500 dark:text-gray-400">{t.VALIDATION_STATUS}</div>
+                            <div className={`text-xs ${result.validation.passed ? 'text-green-700 dark:text-street-acid' : 'text-pink-700 dark:text-street-pink'}`}>
+                                {result.validation.passed ? t.VALIDATION_PASS : t.VALIDATION_FAIL}
+                            </div>
+                        </div>
+                        <div className="border border-black/20 dark:border-white/20 rounded p-2">
+                            <div className="text-gray-500 dark:text-gray-400">{t.CONFLUENCE_SCORE}</div>
+                            <div className="text-xs text-gray-800 dark:text-gray-100">{result.validation.confluenceScore}/{result.validation.threshold}</div>
+                        </div>
+                        <div className="border border-black/20 dark:border-white/20 rounded p-2 col-span-2">
+                            <div className="text-gray-500 dark:text-gray-400">{t.CONFIRMATION_COUNT}</div>
+                            <div className="text-xs text-gray-800 dark:text-gray-100">{result.validation.confirmations}</div>
+                        </div>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                        {result.auditTrail.map((audit, i) => (
+                            <div key={`audit-${i}`} className="text-[10px] border border-black/20 dark:border-white/20 rounded p-2">
+                                <div className="font-bold uppercase text-gray-700 dark:text-gray-200">{audit.factor.replace(/_/g, ' ')}</div>
+                                <div className="text-gray-500 dark:text-gray-400">{audit.details}</div>
+                                <div className="text-gray-700 dark:text-gray-300">score: {audit.score.toFixed(1)} • weight: {audit.weight.toFixed(2)} • contribution: {audit.contribution.toFixed(2)} • {audit.direction}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
             <div className="p-4 border-2 border-black dark:border-white bg-street-cardLight dark:bg-street-cardDark rounded-xl space-y-3">
                 <div className="text-xs font-bold uppercase text-gray-600 dark:text-gray-300">{t.PROFIT_CONFIG}</div>
@@ -478,6 +506,7 @@ export default function App() {
       } catch { return null; }
   });
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
+  const [isMarketPanelExpanded, setIsMarketPanelExpanded] = useState(true);
   const [alertConfig, setAlertConfig] = useState<AlertConfig>(() => {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('quantmind_alert_config') : null;
     return saved ? JSON.parse(saved) : {
@@ -930,24 +959,36 @@ export default function App() {
               <div className="mt-2 p-3 border-2 border-black/20 dark:border-white/20 rounded-lg bg-street-cardLight dark:bg-street-cardDark space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">{t.MARKET_PANEL_TITLE}</span>
-                  <span className={`text-[10px] px-2 py-1 rounded-full border font-extrabold uppercase tracking-wide ${MARKET_REGIME_STYLES[marketStatusSummary.regimeState]}`}>
-                    {t[`MARKET_REGIME_${marketStatusSummary.regimeState}` as keyof typeof t]}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] px-2 py-1 rounded-full border font-extrabold uppercase tracking-wide ${MARKET_REGIME_STYLES[marketStatusSummary.regimeState]}`}>
+                      {t[`MARKET_REGIME_${marketStatusSummary.regimeState}` as keyof typeof t]}
+                    </span>
+                    <button
+                      onClick={() => setIsMarketPanelExpanded((prev) => !prev)}
+                      className="text-[10px] px-2 py-1 rounded border border-black/20 dark:border-white/20 font-extrabold uppercase tracking-wide"
+                    >
+                      {isMarketPanelExpanded ? t.MARKET_PANEL_COLLAPSE : t.MARKET_PANEL_EXPAND}
+                    </button>
+                  </div>
                 </div>
-                <div className="p-2 border border-black/20 dark:border-white/20 rounded-lg bg-black/[0.03] dark:bg-white/[0.02]">
-                  <p className="text-xs font-extrabold uppercase tracking-wide text-gray-900 dark:text-gray-100">
-                    {t[marketStatusSummary.conclusionKey as keyof typeof t]}
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-[10px] font-bold uppercase">
-                  {marketStatusSummary.diagnostics.map((diag) => (
-                    <div key={diag.labelKey} className="border border-black/20 dark:border-white/20 rounded p-1.5">
-                      <div className="text-gray-500 dark:text-gray-400">{t[diag.labelKey as keyof typeof t]}</div>
-                      <div className="text-gray-800 dark:text-gray-100 text-xs">{diag.value}</div>
-                      <div className="text-[9px] text-gray-500 dark:text-gray-400">{t[diag.detail as keyof typeof t]}</div>
+                {isMarketPanelExpanded && (
+                  <>
+                    <div className="p-2 border border-black/20 dark:border-white/20 rounded-lg bg-black/[0.03] dark:bg-white/[0.02]">
+                      <p className="text-xs font-extrabold uppercase tracking-wide text-gray-900 dark:text-gray-100">
+                        {t[marketStatusSummary.conclusionKey as keyof typeof t]}
+                      </p>
                     </div>
-                  ))}
-                </div>
+                    <div className="grid grid-cols-2 gap-2 text-[10px] font-bold uppercase">
+                      {marketStatusSummary.diagnostics.map((diag) => (
+                        <div key={diag.labelKey} className="border border-black/20 dark:border-white/20 rounded p-1.5">
+                          <div className="text-gray-500 dark:text-gray-400">{t[diag.labelKey as keyof typeof t]}</div>
+                          <div className="text-gray-800 dark:text-gray-100 text-xs">{diag.value}</div>
+                          <div className="text-[9px] text-gray-500 dark:text-gray-400">{t[diag.detail as keyof typeof t]}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </>
            )}

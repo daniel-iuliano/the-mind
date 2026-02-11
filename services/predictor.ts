@@ -2,8 +2,12 @@ import { MarketAnalysis, SupportResistanceLevel, PredictionResult, OHLCV } from 
 import { formatPrice } from "../utils/formatters";
 
 type MarketRegime = 'VOLATILE' | 'CALM' | 'TRENDING' | 'RANGING';
+type Direction = 'BULL' | 'BEAR' | 'NEUTRAL';
 
 const MIN_RR = 3;
+const MIN_CONFIRMATIONS = 4;
+const CONFLUENCE_THRESHOLD = 60;
+const DIRECTIONAL_EDGE_THRESHOLD = 10;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -31,8 +35,6 @@ const detectMarketRegime = (analysis: MarketAnalysis): MarketRegime => {
   return 'RANGING';
 };
 
-
-
 interface OrderBlockInsights {
   volumeDistribution: number;
   positioningImbalance: number;
@@ -43,7 +45,20 @@ interface OrderBlockInsights {
   supplyBias: number;
 }
 
-const inferOrderBlockInsights = (analysis: MarketAnalysis, levels: SupportResistanceLevel[]): OrderBlockInsights => {
+interface WeightedFactor {
+  factor: string;
+  score: number;
+  weight: number;
+  contribution: number;
+  direction: Direction;
+  details: string;
+}
+
+const inferOrderBlockInsights = (
+  analysis: MarketAnalysis,
+  levels: SupportResistanceLevel[],
+  orderBookImbalance: number | null,
+): OrderBlockInsights => {
   const { price, change24h, volume24h, indicators } = analysis;
   const atrPct = price > 0 ? indicators.atr / price : 0;
   const bbRange = Math.max(indicators.bb.upper - indicators.bb.lower, price * 0.0025);
@@ -56,16 +71,23 @@ const inferOrderBlockInsights = (analysis: MarketAnalysis, levels: SupportResist
   const supportWeight = levels.filter((l) => l.type === 'support').reduce((acc, l) => acc + l.strength, 0);
   const resistanceWeight = levels.filter((l) => l.type === 'resistance').reduce((acc, l) => acc + l.strength, 0);
 
-  const volumeDistribution = clamp(Math.abs(change24h) * 5 + atrPct * 900 + (volume24h > 0 ? Math.log10(volume24h + 1) * 5 : 0), 0, 100);
-  const positioningImbalance = clamp(Math.abs(trendSlope) * 8500 + Math.abs(macroSlope) * 6800, 0, 100);
-  const liquidityClusters = clamp(levels.length * 10 + medianStrength * 9 + Math.abs(change24h) * 2, 0, 100);
+  const orderBookEdge = typeof orderBookImbalance === 'number' ? Math.abs(orderBookImbalance) * 70 : 8;
+
+  const volumeDistribution = clamp(Math.abs(change24h) * 4 + atrPct * 780 + (volume24h > 0 ? Math.log10(volume24h + 1) * 7 : 0), 0, 100);
+  const positioningImbalance = clamp(Math.abs(trendSlope) * 8500 + Math.abs(macroSlope) * 6800 + orderBookEdge, 0, 100);
+  const liquidityClusters = clamp(levels.length * 10 + medianStrength * 9 + Math.abs(change24h) * 2.2, 0, 100);
   const highVolumeZones = clamp((bbPosition < 0.3 || bbPosition > 0.7 ? 58 : 38) + volumeDistribution * 0.45, 0, 100);
   const structuralPressure = clamp((supportWeight + resistanceWeight) * 4 + Math.abs(macroSlope) * 4000, 0, 100);
 
   const directionalFromLevels = clamp((supportWeight - resistanceWeight) * 6, -100, 100);
   const directionalFromPrice = clamp((0.5 - bbPosition) * 120 + (0 - change24h) * 4, -100, 100);
   const directionalFromTrend = clamp((trendSlope + macroSlope) * 2600, -100, 100);
-  const netFlow = clamp(directionalFromLevels * 0.34 + directionalFromPrice * 0.38 + directionalFromTrend * 0.28, -100, 100);
+  const directionalFromBook = typeof orderBookImbalance === 'number' ? clamp(orderBookImbalance * 100, -100, 100) : 0;
+  const netFlow = clamp(
+    directionalFromLevels * 0.29 + directionalFromPrice * 0.31 + directionalFromTrend * 0.24 + directionalFromBook * 0.16,
+    -100,
+    100,
+  );
 
   return {
     volumeDistribution,
@@ -154,28 +176,17 @@ const calculateLevelCandidates = (analysis: MarketAnalysis, levels: SupportResis
   return all.filter((value, idx) => idx === 0 || Math.abs(value - all[idx - 1]) / Math.max(value, 1) > 0.001);
 };
 
+const evaluateCandlesAndStructure = (candles: OHLCV[]) => {
+  if (candles.length < 6) return { bull: 0, bear: 0, reasons: [] as string[] };
 
-
-const evaluateCandleAndStructure = (candles: OHLCV[]) => {
-  if (candles.length < 3) return { bull: 0, bear: 0, reasons: [] as string[] };
   const latest = candles[candles.length - 1];
   const prev = candles[candles.length - 2];
+  const prev2 = candles[candles.length - 3];
+
   const body = Math.abs(latest.close - latest.open);
   const range = Math.max(latest.high - latest.low, latest.close * 0.0001);
   const upperWick = latest.high - Math.max(latest.open, latest.close);
   const lowerWick = Math.min(latest.open, latest.close) - latest.low;
-
-  let hh = 0;
-  let hl = 0;
-  let lh = 0;
-  let ll = 0;
-  const lookback = candles.slice(-14);
-  for (let i = 1; i < lookback.length; i++) {
-    if (lookback[i].high > lookback[i-1].high) hh += 1;
-    if (lookback[i].low > lookback[i-1].low) hl += 1;
-    if (lookback[i].high < lookback[i-1].high) lh += 1;
-    if (lookback[i].low < lookback[i-1].low) ll += 1;
-  }
 
   const reasons: string[] = [];
   let bull = 0;
@@ -198,12 +209,165 @@ const evaluateCandleAndStructure = (candles: OHLCV[]) => {
     reasons.push('CANDLE_PINBAR_BEAR');
   }
 
-  const bullStructure = (hh + hl) / Math.max((lookback.length - 1) * 2, 1);
-  const bearStructure = (lh + ll) / Math.max((lookback.length - 1) * 2, 1);
+  const insideBar = latest.high <= prev.high && latest.low >= prev.low;
+  if (insideBar) reasons.push('CANDLE_INSIDE_BAR_COMPRESSION');
+
+  const bullContinuation = latest.close > prev.high && prev.close > prev.open;
+  const bearContinuation = latest.close < prev.low && prev.close < prev.open;
+  if (bullContinuation) { bull += 8; reasons.push('CANDLE_CONTINUATION_BULL'); }
+  if (bearContinuation) { bear += 8; reasons.push('CANDLE_CONTINUATION_BEAR'); }
+
+  const highs = candles.slice(-14).map((c) => c.high);
+  const lows = candles.slice(-14).map((c) => c.low);
+  const hh = highs.filter((value, idx) => idx > 0 && value > highs[idx - 1]).length;
+  const hl = lows.filter((value, idx) => idx > 0 && value > lows[idx - 1]).length;
+  const lh = highs.filter((value, idx) => idx > 0 && value < highs[idx - 1]).length;
+  const ll = lows.filter((value, idx) => idx > 0 && value < lows[idx - 1]).length;
+
+  const bullStructure = (hh + hl) / Math.max((highs.length - 1) * 2, 1);
+  const bearStructure = (lh + ll) / Math.max((highs.length - 1) * 2, 1);
   if (bullStructure >= 0.58) { bull += 12; reasons.push('STRUCTURE_HH_HL_BULL'); }
   if (bearStructure >= 0.58) { bear += 12; reasons.push('STRUCTURE_LH_LL_BEAR'); }
 
+  const highestRecent = Math.max(...candles.slice(-10).map((c) => c.high));
+  const lowestRecent = Math.min(...candles.slice(-10).map((c) => c.low));
+  if (latest.close > highestRecent * 0.9995 && prev.close <= highestRecent * 0.9985) {
+    bull += 10;
+    reasons.push('STRUCTURE_BREAK_OF_STRUCTURE_BULL');
+  }
+  if (latest.close < lowestRecent * 1.0005 && prev.close >= lowestRecent * 1.0015) {
+    bear += 10;
+    reasons.push('STRUCTURE_BREAK_OF_STRUCTURE_BEAR');
+  }
+
+  const chochBull = prev2.low < prev.low && latest.low > prev.low && latest.close > prev.close;
+  const chochBear = prev2.high > prev.high && latest.high < prev.high && latest.close < prev.close;
+  if (chochBull) { bull += 6; reasons.push('STRUCTURE_CHOCH_BULL'); }
+  if (chochBear) { bear += 6; reasons.push('STRUCTURE_CHOCH_BEAR'); }
+
   return { bull, bear, reasons };
+};
+
+const buildVolumeProfileSignal = (candles: OHLCV[]) => {
+  if (candles.length < 12) return { score: 50, direction: 'NEUTRAL' as Direction, details: 'Insufficient candles for profile', reasons: [] as string[] };
+
+  const closes = candles.map((c) => c.close);
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const bins = 8;
+  const step = Math.max((max - min) / bins, Math.max(max, 1) * 0.0005);
+  const volumeBins = new Array(bins).fill(0);
+
+  candles.forEach((c) => {
+    const idx = clamp(Math.floor((c.close - min) / step), 0, bins - 1);
+    volumeBins[idx] += c.volume;
+  });
+
+  const totalVolume = volumeBins.reduce((acc, v) => acc + v, 0);
+  if (totalVolume <= 0) return { score: 50, direction: 'NEUTRAL' as Direction, details: 'No volume registered', reasons: [] as string[] };
+
+  const pocIndex = volumeBins.reduce((best, volume, idx) => (volume > volumeBins[best] ? idx : best), 0);
+  const pocPrice = min + step * (pocIndex + 0.5);
+  const latest = candles[candles.length - 1].close;
+  const distance = (latest - pocPrice) / Math.max(latest, 1);
+
+  if (distance >= 0.006) {
+    return {
+      score: clamp(50 + distance * 3800, 50, 100),
+      direction: 'BULL' as Direction,
+      details: `Price above POC (${formatPrice(pocPrice)}) with supportive volume node`,
+      reasons: ['VOLUME_PROFILE_BULL_SUPPORT'],
+    };
+  }
+
+  if (distance <= -0.006) {
+    return {
+      score: clamp(50 + Math.abs(distance) * 3800, 50, 100),
+      direction: 'BEAR' as Direction,
+      details: `Price below POC (${formatPrice(pocPrice)}) with overhead supply node`,
+      reasons: ['VOLUME_PROFILE_BEAR_PRESSURE'],
+    };
+  }
+
+  return {
+    score: 52,
+    direction: 'NEUTRAL' as Direction,
+    details: `Price near POC (${formatPrice(pocPrice)}) in balanced distribution`,
+    reasons: ['VOLUME_PROFILE_BALANCED'],
+  };
+};
+
+const buildVolatilitySignal = (analysis: MarketAnalysis, candles: OHLCV[], regime: MarketRegime) => {
+  if (candles.length < 12 || analysis.price <= 0) {
+    return { score: 50, direction: 'NEUTRAL' as Direction, details: 'Insufficient volatility sample', reasons: [] as string[] };
+  }
+
+  const returns = candles.slice(1).map((c, i) => (c.close - candles[i].close) / Math.max(candles[i].close, 1e-9));
+  const mean = returns.reduce((acc, r) => acc + r, 0) / returns.length;
+  const variance = returns.reduce((acc, r) => acc + (r - mean) ** 2, 0) / Math.max(returns.length - 1, 1);
+  const sigma = Math.sqrt(variance);
+  const atrPct = analysis.indicators.atr / analysis.price;
+
+  const stableDirectional = sigma < 0.012 && atrPct < 0.024 && regime !== 'VOLATILE';
+  const noisy = sigma > 0.02 || atrPct > 0.03 || regime === 'VOLATILE';
+
+  if (stableDirectional) {
+    return {
+      score: clamp(62 + (0.02 - sigma) * 700, 55, 90),
+      direction: 'NEUTRAL' as Direction,
+      details: `Stable volatility regime (σ=${(sigma * 100).toFixed(2)}%, ATR=${(atrPct * 100).toFixed(2)}%)`,
+      reasons: ['VOLATILITY_REGIME_STABLE'],
+    };
+  }
+
+  if (noisy) {
+    return {
+      score: clamp(40 - (sigma - 0.02) * 500, 15, 48),
+      direction: 'NEUTRAL' as Direction,
+      details: `High-noise regime (σ=${(sigma * 100).toFixed(2)}%, ATR=${(atrPct * 100).toFixed(2)}%)`,
+      reasons: ['VOLATILITY_REGIME_NOISY'],
+    };
+  }
+
+  return {
+    score: 56,
+    direction: 'NEUTRAL' as Direction,
+    details: `Transitional volatility regime (σ=${(sigma * 100).toFixed(2)}%, ATR=${(atrPct * 100).toFixed(2)}%)`,
+    reasons: ['VOLATILITY_REGIME_TRANSITION'],
+  };
+};
+
+const buildMomentumSignal = (analysis: MarketAnalysis) => {
+  const { indicators, price } = analysis;
+  const rsiEdge = clamp((indicators.rsi - 50) / 18, -1, 1);
+  const stochEdge = clamp((indicators.stochRsi.k - indicators.stochRsi.d) / 35, -1, 1);
+  const macdEdge = clamp(indicators.macd.histogram / Math.max(price * 0.01, 1e-9), -1, 1);
+  const composite = rsiEdge * 0.35 + stochEdge * 0.25 + macdEdge * 0.4;
+
+  if (composite >= 0.2) {
+    return {
+      score: clamp(50 + composite * 42, 50, 95),
+      direction: 'BULL' as Direction,
+      details: `RSI/Stoch/MACD aligned bullish (${composite.toFixed(2)})`,
+      reasons: ['MOMENTUM_STACK_BULLISH'],
+    };
+  }
+
+  if (composite <= -0.2) {
+    return {
+      score: clamp(50 + Math.abs(composite) * 42, 50, 95),
+      direction: 'BEAR' as Direction,
+      details: `RSI/Stoch/MACD aligned bearish (${composite.toFixed(2)})`,
+      reasons: ['MOMENTUM_STACK_BEARISH'],
+    };
+  }
+
+  return {
+    score: 52,
+    direction: 'NEUTRAL' as Direction,
+    details: `Momentum mixed (${composite.toFixed(2)})`,
+    reasons: ['MOMENTUM_MIXED'],
+  };
 };
 
 const findBestRiskPlan = (
@@ -256,93 +420,144 @@ const findBestRiskPlan = (
   return plans[0];
 };
 
+const directionToBias = (direction: Direction): 'ALCISTA' | 'BAJISTA' | 'NEUTRAL' => {
+  if (direction === 'BULL') return 'ALCISTA';
+  if (direction === 'BEAR') return 'BAJISTA';
+  return 'NEUTRAL';
+};
+
 export const generatePrediction = (
-  analysis: MarketAnalysis, 
+  analysis: MarketAnalysis,
   levels: SupportResistanceLevel[],
   candles: OHLCV[] = [],
   orderBookImbalance: number | null = null,
 ): PredictionResult => {
   const currentPrice = analysis.price;
   const atr = analysis.indicators.atr;
-  let predictionBias: 'ALCISTA' | 'BAJISTA' | 'NEUTRAL' = 'NEUTRAL';
-  if (analysis.marketCondition === 'BULLISH') predictionBias = 'ALCISTA';
-  else if (analysis.marketCondition === 'BEARISH') predictionBias = 'BAJISTA';
-
   const regime = detectMarketRegime(analysis);
-  const orderBlockInsights = inferOrderBlockInsights(analysis, levels);
 
-  // --- Probability Calculation (with regime weighting and statistical confidence) ---
-  const directionalScore = predictionBias === 'NEUTRAL' ? 50 : analysis.score;
-  const normalizedSignal = clamp((directionalScore - 50) / 50, 0, 1);
+  const structuralBaseDirection: Direction =
+    analysis.marketCondition === 'BULLISH' ? 'BULL' : analysis.marketCondition === 'BEARISH' ? 'BEAR' : 'NEUTRAL';
+
+  const candleStructure = evaluateCandlesAndStructure(candles);
+  const orderBlockInsights = inferOrderBlockInsights(analysis, levels, orderBookImbalance);
+  const volumeProfileSignal = buildVolumeProfileSignal(candles);
+  const volatilitySignal = buildVolatilitySignal(analysis, candles, regime);
+  const momentumSignal = buildMomentumSignal(analysis);
+
   const trendGap = Math.abs(analysis.indicators.ema20 - analysis.indicators.ema50) / Math.max(currentPrice, 1);
-  const momentumStrength = Math.abs(analysis.indicators.macd.histogram) / Math.max(currentPrice * 0.01, 1e-9);
-  const candleStructure = evaluateCandleAndStructure(candles);
-  const orderFlowBoost = typeof orderBookImbalance === 'number' ? clamp(Math.abs(orderBookImbalance) * 1.6, 0, 0.2) : 0.04;
-
-  const confidenceRaw =
-    normalizedSignal * 0.36 +
-    clamp(trendGap * 12, 0, 1) * 0.18 +
-    clamp(momentumStrength * 0.2, 0, 1) * 0.15 +
-    clamp((orderBlockInsights.volumeDistribution + orderBlockInsights.structuralPressure) / 200, 0, 1) * 0.16 +
-    clamp((candleStructure.bull + candleStructure.bear) / 50, 0, 1) * 0.09 +
-    orderFlowBoost;
-
-  const regimeProbabilityBias: Record<MarketRegime, number> = {
-    VOLATILE: -6,
-    CALM: -3,
-    TRENDING: 6,
-    RANGING: -1,
+  const trendSignal = {
+    score: clamp(50 + trendGap * 2000, 45, 95),
+    direction: structuralBaseDirection,
+    details: `EMA trend displacement ${(trendGap * 100).toFixed(2)}% with condition ${analysis.marketCondition}`,
+    reasons: ['TREND_ALIGNMENT_MATRIX'],
   };
 
-  const orderBlockDirectionalEdge = Math.abs(orderBlockInsights.demandBias - orderBlockInsights.supplyBias) * 0.12;
-  let probability = Math.round(45 + confidenceRaw * 44 + regimeProbabilityBias[regime] + orderBlockDirectionalEdge);
+  const orderBlockDirectionalEdge = orderBlockInsights.demandBias - orderBlockInsights.supplyBias;
+  const orderBlockSignal = {
+    score: clamp(50 + Math.abs(orderBlockDirectionalEdge) * 0.45, 45, 95),
+    direction: orderBlockDirectionalEdge > 6 ? 'BULL' as Direction : orderBlockDirectionalEdge < -6 ? 'BEAR' as Direction : 'NEUTRAL' as Direction,
+    details: `Order block pressure D:${orderBlockInsights.demandBias.toFixed(1)} / S:${orderBlockInsights.supplyBias.toFixed(1)}`,
+    reasons: [
+      'OB_VOLUME_DISTRIBUTION_ACTIVE',
+      'OB_POSITIONING_IMBALANCE_VISIBLE',
+      'OB_LIQUIDITY_CLUSTERS_NEAR_PRICE',
+      'OB_SUPPLY_DEMAND_STRUCTURE_ACTIVE',
+    ],
+  };
 
-  if (predictionBias === 'ALCISTA') {
-    probability += Math.round((candleStructure.bull - candleStructure.bear) * 0.35);
-  } else if (predictionBias === 'BAJISTA') {
-    probability += Math.round((candleStructure.bear - candleStructure.bull) * 0.35);
-  }
+  const candleDirection = candleStructure.bull > candleStructure.bear ? 'BULL' : candleStructure.bear > candleStructure.bull ? 'BEAR' : 'NEUTRAL';
+  const candleSignal = {
+    score: clamp(50 + Math.abs(candleStructure.bull - candleStructure.bear) * 1.4, 45, 95),
+    direction: candleDirection as Direction,
+    details: `Pattern score bull:${candleStructure.bull} bear:${candleStructure.bear}`,
+    reasons: candleStructure.reasons,
+  };
 
-  probability = clamp(probability, 40, 92);
+  const factors: WeightedFactor[] = [
+    { factor: 'trend_structure', score: trendSignal.score, weight: 0.2, contribution: 0, direction: trendSignal.direction, details: trendSignal.details },
+    { factor: 'candlestick_patterns', score: candleSignal.score, weight: 0.16, contribution: 0, direction: candleSignal.direction, details: candleSignal.details },
+    { factor: 'momentum_confirmation', score: momentumSignal.score, weight: 0.14, contribution: 0, direction: momentumSignal.direction, details: momentumSignal.details },
+    { factor: 'order_block_logic', score: orderBlockSignal.score, weight: 0.18, contribution: 0, direction: orderBlockSignal.direction, details: orderBlockSignal.details },
+    { factor: 'volume_profile', score: volumeProfileSignal.score, weight: 0.14, contribution: 0, direction: volumeProfileSignal.direction, details: volumeProfileSignal.details },
+    { factor: 'volatility_regime', score: volatilitySignal.score, weight: 0.08, contribution: 0, direction: volatilitySignal.direction, details: volatilitySignal.details },
+    {
+      factor: 'statistical_confidence',
+      score: clamp(45 + Math.abs(analysis.score - 50) * 0.9 + Math.abs(orderBookImbalance ?? 0) * 30, 40, 95),
+      weight: 0.1,
+      contribution: 0,
+      direction: structuralBaseDirection,
+      details: `Weighted score:${Math.round(analysis.score)} orderbook:${(orderBookImbalance ?? 0).toFixed(3)}`,
+    },
+  ];
 
-  // --- Targets & Stop Loss ---
+  factors.forEach((factor) => {
+    factor.contribution = Number((factor.score * factor.weight).toFixed(2));
+  });
+
+  const directionalBull = factors.reduce((acc, f) => acc + (f.direction === 'BULL' ? f.contribution : 0), 0);
+  const directionalBear = factors.reduce((acc, f) => acc + (f.direction === 'BEAR' ? f.contribution : 0), 0);
+  const directionalEdge = directionalBull - directionalBear;
+  const confluenceScore = Math.round(factors.reduce((acc, f) => acc + f.contribution, 0));
+
+  const confirmations = factors.filter((f) => {
+    if (directionalEdge >= 0) return f.direction === 'BULL' && f.score >= 56;
+    return f.direction === 'BEAR' && f.score >= 56;
+  }).length;
+
+  let finalDirection: Direction = 'NEUTRAL';
+  if (directionalEdge >= DIRECTIONAL_EDGE_THRESHOLD) finalDirection = 'BULL';
+  if (directionalEdge <= -DIRECTIONAL_EDGE_THRESHOLD) finalDirection = 'BEAR';
+
   const candidateLevels = calculateLevelCandidates(analysis, levels);
+  let predictionBias = directionToBias(finalDirection);
   const { targetPrice, stopLoss, rr } = findBestRiskPlan(predictionBias, currentPrice, candidateLevels, regime);
 
-  if ((predictionBias === 'ALCISTA' || predictionBias === 'BAJISTA') && (!targetPrice || !stopLoss)) {
+  const validationPassed =
+    finalDirection !== 'NEUTRAL' &&
+    confirmations >= MIN_CONFIRMATIONS &&
+    confluenceScore >= CONFLUENCE_THRESHOLD &&
+    !!targetPrice &&
+    !!stopLoss &&
+    rr >= MIN_RR;
+
+  if (!validationPassed) {
     predictionBias = 'NEUTRAL';
-    probability = Math.max(40, probability - 10);
   }
 
-  // --- Risk Assessment ---
-  // Volatility based risk
-  const volatilityPct = (atr / currentPrice) * 100;
+  let probability = Math.round(clamp(40 + confluenceScore * 0.5 + Math.abs(directionalEdge) * 0.45, 40, 94));
+  if (!validationPassed) probability = Math.max(40, probability - 12);
+
+  const volatilityPct = currentPrice > 0 ? (atr / currentPrice) * 100 : 0;
   let riskLevel: 'BAJO' | 'MEDIO' | 'ALTO' = 'MEDIO';
   if (volatilityPct > 2.5 || regime === 'VOLATILE') riskLevel = 'ALTO';
   if (volatilityPct < 0.7 && regime === 'CALM') riskLevel = 'BAJO';
 
-  // --- Reasoning ---
-  const reasoning = [...analysis.reasons, ...candleStructure.reasons];
+  const reasoning = [
+    ...analysis.reasons,
+    ...candleSignal.reasons,
+    ...momentumSignal.reasons,
+    ...volumeProfileSignal.reasons,
+    ...volatilitySignal.reasons,
+    ...orderBlockSignal.reasons,
+  ];
+
   if (typeof orderBookImbalance === 'number') {
     if (orderBookImbalance >= 0.1) reasoning.push('ORDERBOOK_BID_DOMINANCE');
     else if (orderBookImbalance <= -0.1) reasoning.push('ORDERBOOK_ASK_DOMINANCE');
     else reasoning.push('ORDERBOOK_BALANCED');
   }
-  if (volatilityPct > 2) reasoning.push("HIGH_VOL_RISK");
+
   reasoning.push(`REGIME_${regime}`);
-  reasoning.push("OB_VOLUME_DISTRIBUTION_ACTIVE");
-  reasoning.push("OB_POSITIONING_IMBALANCE_VISIBLE");
-  reasoning.push("OB_LIQUIDITY_CLUSTERS_NEAR_PRICE");
-  reasoning.push("OB_SUPPLY_DEMAND_STRUCTURE_ACTIVE");
-  if (targetPrice && stopLoss && rr >= MIN_RR) reasoning.push("RR_3_TO_1_CONFIRMED");
-  if (!targetPrice || !stopLoss) reasoning.push("NO_VALID_3R_SETUP");
+  if (validationPassed) reasoning.push('PREDICTION_VALIDATION_PASSED');
+  else reasoning.push('PREDICTION_VALIDATION_FAILED');
 
   const sortedSR = levels.map((level) => level.price).sort((a, b) => a - b);
   const q1 = percentile(sortedSR, 0.25);
   const q3 = percentile(sortedSR, 0.75);
   if (q1 > 0 && q3 > 0) {
-    if (currentPrice < q1) reasoning.push("PRICE_IN_LOWER_VALUE_ZONE");
-    if (currentPrice > q3) reasoning.push("PRICE_IN_UPPER_VALUE_ZONE");
+    if (currentPrice < q1) reasoning.push('PRICE_IN_LOWER_VALUE_ZONE');
+    if (currentPrice > q3) reasoning.push('PRICE_IN_UPPER_VALUE_ZONE');
   }
 
   const nowSummary = buildNowSummary(predictionBias, orderBlockInsights, regime);
@@ -352,13 +567,20 @@ export const generatePrediction = (
     symbol: analysis.symbol,
     bias: predictionBias,
     entryZone: `$${formatPrice(currentPrice)}`,
-    targetPrice,
-    stopLoss,
+    targetPrice: predictionBias === 'NEUTRAL' ? null : targetPrice,
+    stopLoss: predictionBias === 'NEUTRAL' ? null : stopLoss,
     probability,
-    reasoning: reasoning.slice(0, 5),
+    reasoning: Array.from(new Set(reasoning)).slice(0, 8),
     nowSummary,
     nextScenarios,
     riskLevel,
-    timestamp: Date.now()
+    validation: {
+      passed: validationPassed,
+      confluenceScore,
+      confirmations,
+      threshold: CONFLUENCE_THRESHOLD,
+    },
+    auditTrail: factors,
+    timestamp: Date.now(),
   };
 };
