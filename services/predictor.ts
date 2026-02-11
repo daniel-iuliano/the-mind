@@ -1,4 +1,4 @@
-import { MarketAnalysis, SupportResistanceLevel, PredictionResult } from "../types";
+import { MarketAnalysis, SupportResistanceLevel, PredictionResult, OHLCV } from "../types";
 import { formatPrice } from "../utils/formatters";
 
 type MarketRegime = 'VOLATILE' | 'CALM' | 'TRENDING' | 'RANGING';
@@ -154,6 +154,58 @@ const calculateLevelCandidates = (analysis: MarketAnalysis, levels: SupportResis
   return all.filter((value, idx) => idx === 0 || Math.abs(value - all[idx - 1]) / Math.max(value, 1) > 0.001);
 };
 
+
+
+const evaluateCandleAndStructure = (candles: OHLCV[]) => {
+  if (candles.length < 3) return { bull: 0, bear: 0, reasons: [] as string[] };
+  const latest = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
+  const body = Math.abs(latest.close - latest.open);
+  const range = Math.max(latest.high - latest.low, latest.close * 0.0001);
+  const upperWick = latest.high - Math.max(latest.open, latest.close);
+  const lowerWick = Math.min(latest.open, latest.close) - latest.low;
+
+  let hh = 0;
+  let hl = 0;
+  let lh = 0;
+  let ll = 0;
+  const lookback = candles.slice(-14);
+  for (let i = 1; i < lookback.length; i++) {
+    if (lookback[i].high > lookback[i-1].high) hh += 1;
+    if (lookback[i].low > lookback[i-1].low) hl += 1;
+    if (lookback[i].high < lookback[i-1].high) lh += 1;
+    if (lookback[i].low < lookback[i-1].low) ll += 1;
+  }
+
+  const reasons: string[] = [];
+  let bull = 0;
+  let bear = 0;
+
+  const bullishEngulfing = prev.close < prev.open && latest.close > latest.open && latest.close >= prev.open && latest.open <= prev.close;
+  const bearishEngulfing = prev.close > prev.open && latest.close < latest.open && latest.open >= prev.close && latest.close <= prev.open;
+  if (bullishEngulfing) { bull += 14; reasons.push('CANDLE_BULLISH_ENGULFING'); }
+  if (bearishEngulfing) { bear += 14; reasons.push('CANDLE_BEARISH_ENGULFING'); }
+
+  const doji = body / range <= 0.1;
+  if (doji) reasons.push('CANDLE_DOJI_INDECISION');
+
+  if (lowerWick / range >= 0.55 && body / range <= 0.3 && latest.close >= latest.open) {
+    bull += 10;
+    reasons.push('CANDLE_PINBAR_BULL');
+  }
+  if (upperWick / range >= 0.55 && body / range <= 0.3 && latest.close <= latest.open) {
+    bear += 10;
+    reasons.push('CANDLE_PINBAR_BEAR');
+  }
+
+  const bullStructure = (hh + hl) / Math.max((lookback.length - 1) * 2, 1);
+  const bearStructure = (lh + ll) / Math.max((lookback.length - 1) * 2, 1);
+  if (bullStructure >= 0.58) { bull += 12; reasons.push('STRUCTURE_HH_HL_BULL'); }
+  if (bearStructure >= 0.58) { bear += 12; reasons.push('STRUCTURE_LH_LL_BEAR'); }
+
+  return { bull, bear, reasons };
+};
+
 const findBestRiskPlan = (
   bias: 'ALCISTA' | 'BAJISTA' | 'NEUTRAL',
   price: number,
@@ -206,7 +258,9 @@ const findBestRiskPlan = (
 
 export const generatePrediction = (
   analysis: MarketAnalysis, 
-  levels: SupportResistanceLevel[]
+  levels: SupportResistanceLevel[],
+  candles: OHLCV[] = [],
+  orderBookImbalance: number | null = null,
 ): PredictionResult => {
   const currentPrice = analysis.price;
   const atr = analysis.indicators.atr;
@@ -222,7 +276,16 @@ export const generatePrediction = (
   const normalizedSignal = clamp((directionalScore - 50) / 50, 0, 1);
   const trendGap = Math.abs(analysis.indicators.ema20 - analysis.indicators.ema50) / Math.max(currentPrice, 1);
   const momentumStrength = Math.abs(analysis.indicators.macd.histogram) / Math.max(currentPrice * 0.01, 1e-9);
-  const confidenceRaw = normalizedSignal * 0.45 + clamp(trendGap * 12, 0, 1) * 0.2 + clamp(momentumStrength * 0.2, 0, 1) * 0.15 + clamp((orderBlockInsights.volumeDistribution + orderBlockInsights.structuralPressure) / 200, 0, 1) * 0.2;
+  const candleStructure = evaluateCandleAndStructure(candles);
+  const orderFlowBoost = typeof orderBookImbalance === 'number' ? clamp(Math.abs(orderBookImbalance) * 1.6, 0, 0.2) : 0.04;
+
+  const confidenceRaw =
+    normalizedSignal * 0.36 +
+    clamp(trendGap * 12, 0, 1) * 0.18 +
+    clamp(momentumStrength * 0.2, 0, 1) * 0.15 +
+    clamp((orderBlockInsights.volumeDistribution + orderBlockInsights.structuralPressure) / 200, 0, 1) * 0.16 +
+    clamp((candleStructure.bull + candleStructure.bear) / 50, 0, 1) * 0.09 +
+    orderFlowBoost;
 
   const regimeProbabilityBias: Record<MarketRegime, number> = {
     VOLATILE: -6,
@@ -232,8 +295,15 @@ export const generatePrediction = (
   };
 
   const orderBlockDirectionalEdge = Math.abs(orderBlockInsights.demandBias - orderBlockInsights.supplyBias) * 0.12;
-  let probability = Math.round(46 + confidenceRaw * 42 + regimeProbabilityBias[regime] + orderBlockDirectionalEdge);
-  probability = clamp(probability, 40, 90);
+  let probability = Math.round(45 + confidenceRaw * 44 + regimeProbabilityBias[regime] + orderBlockDirectionalEdge);
+
+  if (predictionBias === 'ALCISTA') {
+    probability += Math.round((candleStructure.bull - candleStructure.bear) * 0.35);
+  } else if (predictionBias === 'BAJISTA') {
+    probability += Math.round((candleStructure.bear - candleStructure.bull) * 0.35);
+  }
+
+  probability = clamp(probability, 40, 92);
 
   // --- Targets & Stop Loss ---
   const candidateLevels = calculateLevelCandidates(analysis, levels);
@@ -252,7 +322,12 @@ export const generatePrediction = (
   if (volatilityPct < 0.7 && regime === 'CALM') riskLevel = 'BAJO';
 
   // --- Reasoning ---
-  const reasoning = [...analysis.reasons];
+  const reasoning = [...analysis.reasons, ...candleStructure.reasons];
+  if (typeof orderBookImbalance === 'number') {
+    if (orderBookImbalance >= 0.1) reasoning.push('ORDERBOOK_BID_DOMINANCE');
+    else if (orderBookImbalance <= -0.1) reasoning.push('ORDERBOOK_ASK_DOMINANCE');
+    else reasoning.push('ORDERBOOK_BALANCED');
+  }
   if (volatilityPct > 2) reasoning.push("HIGH_VOL_RISK");
   reasoning.push(`REGIME_${regime}`);
   reasoning.push("OB_VOLUME_DISTRIBUTION_ACTIVE");

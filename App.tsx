@@ -459,6 +459,7 @@ export default function App() {
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>(DEFAULT_TIMEFRAME);
   const [isScanning, setIsScanning] = useState(true);
   const [chartData, setChartData] = useState<(OHLCV & { ema20?: number, ema50?: number })[]>([]);
+  const [chartMode, setChartMode] = useState<'line' | 'candles'>('line');
   const [srLevels, setSrLevels] = useState<SupportResistanceLevel[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -486,6 +487,7 @@ export default function App() {
     };
   });
   const lastAlertsRef = useRef<Map<string, number>>(new Map());
+  const orderFlowRef = useRef<Map<string, number | null>>(new Map());
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'dark' | 'light' | null;
@@ -585,7 +587,8 @@ export default function App() {
       if (!analysis) return;
       withLoader(async () => {
           await wait(600); 
-          const result = generatePrediction(analysis, srLevels);
+          const orderFlow = orderFlowRef.current.get(selectedSymbol) ?? null;
+          const result = generatePrediction(analysis, srLevels, chartData, orderFlow);
           const displayResult = isOppositeMode ? invertPrediction(result) : result;
           setPredictionResult(displayResult);
           setIsPredictionModalOpen(true);
@@ -664,7 +667,8 @@ export default function App() {
         const prevVolume = prevCandle.volume; 
         const open24h = candles[candles.length - Math.min(24, candles.length)]?.open || livePrice;
         const changeVal = ticker ? ticker.change : ((livePrice - open24h) / open24h) * 100;
-        const analysis = scoreMarket(symbol, livePrice, indicators, liveVolume, prevVolume, changeVal, orderBookImbalance);
+        const analysis = scoreMarket(symbol, livePrice, indicators, liveVolume, prevVolume, changeVal, orderBookImbalance, candles, activeTimeframe);
+        orderFlowRef.current.set(symbol, orderBookImbalance ?? null);
 
         setMarketData(prevData => {
             const existingIndex = prevData.findIndex((d) => d.symbol === symbol);
@@ -681,7 +685,7 @@ export default function App() {
             let prediction: PredictionResult | null = null;
             if (alertConfig.predictMode && analysis.score >= 75) {
                 const levels = calculateSupportResistance(candles);
-                prediction = generatePrediction(analysis, levels);
+                prediction = generatePrediction(analysis, levels, candles, orderBookImbalance ?? null);
                 if (isOppositeMode) {
                   prediction = invertPrediction(prediction);
                 }
@@ -998,9 +1002,17 @@ export default function App() {
                     {t.OPPOSITE_MODE}
                 </button>
             </div>
+            <div className="flex gap-2 px-4 py-2 border-b-2 border-black/10 dark:border-white/10">
+                <button onClick={() => setChartMode('line')} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${chartMode === 'line' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
+                    Line
+                </button>
+                <button onClick={() => setChartMode('candles')} className={`flex-1 py-2 text-[10px] font-bold uppercase border-2 rounded-lg transition-all ${chartMode === 'candles' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-transparent text-gray-600 dark:text-gray-400 border-black/20 dark:border-white/20'}`}>
+                    Candles
+                </button>
+            </div>
             <div className="flex-1 overflow-y-auto bg-street-light dark:bg-street-dark">
                <div className="h-[350px] w-full border-b-2 border-black dark:border-white bg-white/5 relative">
-                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} theme={theme} />
+                  <Chart data={chartData} symbol={selectedSymbol} levels={srLevels} theme={theme} mode={chartMode} />
                </div>
                <div className="grid grid-cols-3 gap-3 p-4">
                   {[

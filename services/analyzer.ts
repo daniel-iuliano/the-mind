@@ -1,4 +1,4 @@
-import { IndicatorValues, MarketAnalysis, SignalBias } from "../types";
+import { IndicatorValues, MarketAnalysis, OHLCV, SignalBias, Timeframe } from "../types";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -19,7 +19,176 @@ interface PredictiveContext {
   prevVolume: number;
   change24h: number;
   orderBookImbalance?: number | null;
+  candles?: OHLCV[];
+  timeframe?: Timeframe;
 }
+
+interface MarketStateMemory {
+  smoothedDelta: number;
+  lastCondition: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+}
+
+const MARKET_MEMORY = new Map<string, MarketStateMemory>();
+
+const timeframeToMs = (timeframe?: Timeframe): number => {
+  switch (timeframe) {
+    case Timeframe.M1: return 60_000;
+    case Timeframe.M5: return 5 * 60_000;
+    case Timeframe.M15: return 15 * 60_000;
+    case Timeframe.H1: return 60 * 60_000;
+    case Timeframe.H4: return 4 * 60 * 60_000;
+    case Timeframe.D1: return 24 * 60 * 60_000;
+    default: return 15 * 60_000;
+  }
+};
+
+const getCandlesForHours = (candles: OHLCV[] | undefined, timeframe: Timeframe | undefined, hours: number): OHLCV[] => {
+  if (!candles || candles.length < 8) return [];
+  const ms = timeframeToMs(timeframe);
+  const points = Math.max(8, Math.round((hours * 60 * 60 * 1000) / ms));
+  return candles.slice(-points);
+};
+
+const scoreStructuralPattern = (candles: OHLCV[]): { bull: number; bear: number; reasons: string[] } => {
+  if (candles.length < 6) return { bull: 0, bear: 0, reasons: [] };
+  let higherHighs = 0;
+  let higherLows = 0;
+  let lowerHighs = 0;
+  let lowerLows = 0;
+  for (let i = 1; i < candles.length; i++) {
+    if (candles[i].high > candles[i - 1].high) higherHighs += 1;
+    if (candles[i].low > candles[i - 1].low) higherLows += 1;
+    if (candles[i].high < candles[i - 1].high) lowerHighs += 1;
+    if (candles[i].low < candles[i - 1].low) lowerLows += 1;
+  }
+
+  const ratio = (value: number) => value / Math.max(candles.length - 1, 1);
+  const bullStructure = (ratio(higherHighs) + ratio(higherLows)) / 2;
+  const bearStructure = (ratio(lowerHighs) + ratio(lowerLows)) / 2;
+  const reasons: string[] = [];
+  if (bullStructure >= 0.62) reasons.push('STRUCTURE_HH_HL_BULL');
+  if (bearStructure >= 0.62) reasons.push('STRUCTURE_LH_LL_BEAR');
+  return {
+    bull: clamp(bullStructure * 22, 0, 22),
+    bear: clamp(bearStructure * 22, 0, 22),
+    reasons,
+  };
+};
+
+const scoreCandlestickPatterns = (candles: OHLCV[]): { bull: number; bear: number; reasons: string[] } => {
+  if (candles.length < 3) return { bull: 0, bear: 0, reasons: [] };
+  const c0 = candles[candles.length - 1];
+  const c1 = candles[candles.length - 2];
+  const body0 = Math.abs(c0.close - c0.open);
+  const range0 = Math.max(c0.high - c0.low, c0.close * 0.0001);
+  const upperWick = c0.high - Math.max(c0.open, c0.close);
+  const lowerWick = Math.min(c0.open, c0.close) - c0.low;
+  const body1 = Math.abs(c1.close - c1.open);
+  const reasons: string[] = [];
+  let bull = 0;
+  let bear = 0;
+
+  const bullishEngulfing = c1.close < c1.open && c0.close > c0.open && c0.close >= c1.open && c0.open <= c1.close;
+  const bearishEngulfing = c1.close > c1.open && c0.close < c0.open && c0.open >= c1.close && c0.close <= c1.open;
+  if (bullishEngulfing) {
+    bull += 14;
+    reasons.push('CANDLE_BULLISH_ENGULFING');
+  }
+  if (bearishEngulfing) {
+    bear += 14;
+    reasons.push('CANDLE_BEARISH_ENGULFING');
+  }
+
+  const doji = body0 / range0 <= 0.1;
+  if (doji) reasons.push('CANDLE_DOJI_INDECISION');
+
+  const bullishPin = lowerWick / range0 >= 0.55 && body0 / range0 <= 0.3 && c0.close >= c0.open;
+  const bearishPin = upperWick / range0 >= 0.55 && body0 / range0 <= 0.3 && c0.close <= c0.open;
+  if (bullishPin) {
+    bull += 10;
+    reasons.push('CANDLE_PINBAR_BULL');
+  }
+  if (bearishPin) {
+    bear += 10;
+    reasons.push('CANDLE_PINBAR_BEAR');
+  }
+
+  if (body0 > body1 * 1.35 && c0.close > c0.open && c1.close > c1.open) {
+    bull += 6;
+    reasons.push('CANDLE_BULL_MOMENTUM_BODY');
+  }
+  if (body0 > body1 * 1.35 && c0.close < c0.open && c1.close < c1.open) {
+    bear += 6;
+    reasons.push('CANDLE_BEAR_MOMENTUM_BODY');
+  }
+
+  return { bull, bear, reasons };
+};
+
+const build4hSentimentEnvelope = (ctx: PredictiveContext) => {
+  const history = getCandlesForHours(ctx.candles, ctx.timeframe, 4);
+  if (history.length === 0) {
+    return {
+      bull: 0,
+      bear: 0,
+      trendStrength: 0,
+      volatilityRegime: 0,
+      volumeConsistency: 0,
+      orderFlowStrength: 0,
+      structureStrength: 0,
+      reasons: [] as string[],
+    };
+  }
+
+  const closes = history.map((c) => c.close);
+  const returns = closes.slice(1).map((close, i) => (close - closes[i]) / Math.max(closes[i], 1));
+  const meanRet = returns.reduce((sum, val) => sum + val, 0) / Math.max(returns.length, 1);
+  const stdRet = Math.sqrt(returns.reduce((sum, val) => sum + Math.pow(val - meanRet, 2), 0) / Math.max(returns.length, 1));
+  const drift = closes.length > 1 ? (closes[closes.length - 1] - closes[0]) / Math.max(closes[0], 1) : 0;
+
+  const avgRange = history.reduce((sum, c) => sum + (c.high - c.low) / Math.max(c.close, 1), 0) / history.length;
+  const volumes = history.map((c) => c.volume).filter((v) => Number.isFinite(v) && v > 0);
+  const volumeMean = volumes.reduce((sum, v) => sum + v, 0) / Math.max(volumes.length, 1);
+  const volumeStd = Math.sqrt(volumes.reduce((sum, v) => sum + Math.pow(v - volumeMean, 2), 0) / Math.max(volumes.length, 1));
+  const volumeCv = volumeMean > 0 ? volumeStd / volumeMean : 1;
+
+  const candlePatterns = scoreCandlestickPatterns(history);
+  const structurePatterns = scoreStructuralPattern(history);
+
+  const trendStrength = clamp(Math.abs(drift) * 500 + Math.abs(meanRet) * 3500, 0, 100);
+  const volatilityRegime = clamp((avgRange * 1400 + stdRet * 1800), 0, 100);
+  const volumeConsistency = clamp((1 - clamp(volumeCv, 0, 1.3) / 1.3) * 100, 0, 100);
+
+  const orderFlowStrength = typeof ctx.orderBookImbalance === 'number'
+    ? clamp(Math.abs(ctx.orderBookImbalance) * 340, 0, 100)
+    : clamp(Math.abs((ctx.indicators.ema20 - ctx.indicators.ema50) / Math.max(ctx.price, 1)) * 7800, 0, 100);
+
+  const structureStrength = clamp((structurePatterns.bull + structurePatterns.bear) * 2.1, 0, 100);
+
+  const direction = Math.sign(drift + meanRet * 5 + (ctx.orderBookImbalance ?? 0) * 0.2);
+  const baseTrendScore = trendStrength * 0.34 + volatilityRegime * 0.13 + volumeConsistency * 0.15 + orderFlowStrength * 0.2 + structureStrength * 0.18;
+  const bull = direction >= 0 ? baseTrendScore + candlePatterns.bull + structurePatterns.bull : candlePatterns.bull + structurePatterns.bull * 0.6;
+  const bear = direction <= 0 ? baseTrendScore + candlePatterns.bear + structurePatterns.bear : candlePatterns.bear + structurePatterns.bear * 0.6;
+
+  const reasons: string[] = [];
+  if (trendStrength >= 58) reasons.push('MKT4H_TREND_CONFIRMED');
+  if (volatilityRegime >= 42 && volatilityRegime <= 78) reasons.push('MKT4H_VOLATILITY_REGIME_STABLE');
+  if (volumeConsistency >= 52) reasons.push('MKT4H_VOLUME_CONSISTENT');
+  if (orderFlowStrength >= 48) reasons.push('MKT4H_ORDERFLOW_ALIGNED');
+  if (structureStrength >= 50) reasons.push('MKT4H_STRUCTURE_REINFORCED');
+  reasons.push(...candlePatterns.reasons, ...structurePatterns.reasons);
+
+  return {
+    bull: clamp(Math.round(bull), 0, 100),
+    bear: clamp(Math.round(bear), 0, 100),
+    trendStrength,
+    volatilityRegime,
+    volumeConsistency,
+    orderFlowStrength,
+    structureStrength,
+    reasons,
+  };
+};
 
 
 const calculateOrderBlockSnapshot = (ctx: PredictiveContext): OrderBlockSnapshot => {
@@ -86,6 +255,27 @@ const calculateForwardScores = (ctx: PredictiveContext) => {
   const bbPosition = clamp((price - indicators.bb.lower) / bbRange, 0, 1);
   const stochCrossUp = indicators.stochRsi.k > indicators.stochRsi.d;
   const stochCrossDown = indicators.stochRsi.k < indicators.stochRsi.d;
+  const envelope4h = build4hSentimentEnvelope(ctx);
+
+  // 4h forward projection (stability-biased): extend structural drift but penalize noisy states
+  const projectedBias = clamp((envelope4h.bull - envelope4h.bear) * 0.42 + (trendSlope + macroSlope) * 4200 + momentum * 1800, -28, 28);
+  if (projectedBias >= 8) {
+    bull += 12;
+    reasons.push('FORWARD_4H_BULL_PROJECTION');
+  } else if (projectedBias <= -8) {
+    bear += 12;
+    reasons.push('FORWARD_4H_BEAR_PROJECTION');
+  } else {
+    bull += 4;
+    bear += 4;
+    reasons.push('FORWARD_4H_NEUTRAL_PROJECTION');
+  }
+
+  // Reinforce with 4h multi-factor envelope to avoid micro-fluctuation flips.
+  bull += envelope4h.bull * 0.45;
+  bear += envelope4h.bear * 0.45;
+  reasons.push(...envelope4h.reasons);
+
 
   // Trend continuation potential
   if (trendSlope > 0.0025 && macroSlope > 0.004) {
@@ -185,6 +375,8 @@ export const scoreMarket = (
   prevVolume: number,
   change24h: number,
   orderBookImbalance?: number | null,
+  candles?: OHLCV[],
+  timeframe?: Timeframe,
 ): MarketAnalysis => {
   const { bullishStrength, bearishStrength, reasons, volumeRatio } = calculateForwardScores({
     symbol,
@@ -194,18 +386,36 @@ export const scoreMarket = (
     prevVolume,
     change24h,
     orderBookImbalance,
+    candles,
+    timeframe,
   });
 
   const conditionDelta = bullishStrength - bearishStrength;
-  let marketCondition: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
-  if (conditionDelta >= 8) marketCondition = 'BULLISH';
-  else if (conditionDelta <= -8) marketCondition = 'BEARISH';
+  const previous = MARKET_MEMORY.get(symbol);
+  const smoothedDelta = previous
+    ? previous.smoothedDelta * 0.72 + conditionDelta * 0.28
+    : conditionDelta;
 
-  const conditionStrength = marketCondition === 'BULLISH'
+  const prevCondition = previous?.lastCondition ?? 'NEUTRAL';
+  const bullThreshold = prevCondition === 'BEARISH' ? 15 : 11;
+  const bearThreshold = prevCondition === 'BULLISH' ? -15 : -11;
+
+  let marketCondition: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+  if (smoothedDelta >= bullThreshold) marketCondition = 'BULLISH';
+  else if (smoothedDelta <= bearThreshold) marketCondition = 'BEARISH';
+
+  MARKET_MEMORY.set(symbol, {
+    smoothedDelta,
+    lastCondition: marketCondition,
+  });
+
+  const smoothedInfluence = clamp(Math.abs(smoothedDelta) * 1.8, 0, 100);
+  const rawConditionStrength = marketCondition === 'BULLISH'
     ? bullishStrength
     : marketCondition === 'BEARISH'
       ? bearishStrength
       : Math.max(bullishStrength, bearishStrength);
+  const conditionStrength = Math.round(clamp(rawConditionStrength * 0.72 + smoothedInfluence * 0.28, 0, 100));
 
   let bias = SignalBias.NEUTRAL;
   if (marketCondition === 'BULLISH') {
@@ -252,7 +462,7 @@ export const scoreMarket = (
     conditionStrength,
     score: conditionStrength,
     bias,
-    reasons,
+    reasons: Array.from(new Set(reasons)).slice(0, 12),
     earlySignal: {
       side: earlySide,
       confidence: Math.max(earlyLongScore, earlyShortScore),
