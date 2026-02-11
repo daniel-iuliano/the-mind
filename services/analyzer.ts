@@ -876,6 +876,9 @@ export const scoreMarket = (
     earlyReasons = reasons.slice(0, 3);
   }
 
+  const finalScore = Math.round(clamp(conditionStrength * 0.68 + institutional.score * 0.32, 0, 100));
+  const dedupedReasons = Array.from(new Set([...(institutional.sweep ? [institutional.sweep.side === 'LONG' ? 'LIQUIDITY_SWEEP_LONG_CONFIRMED' : 'LIQUIDITY_SWEEP_SHORT_CONFIRMED'] : []), ...reasons])).slice(0, 16);
+
   return {
     symbol,
     price,
@@ -884,9 +887,15 @@ export const scoreMarket = (
     indicators,
     marketCondition,
     conditionStrength,
-    score: Math.round(clamp(conditionStrength * 0.68 + institutional.score * 0.32, 0, 100)),
+    score: finalScore,
     bias,
-    reasons: Array.from(new Set([...(institutional.sweep ? [institutional.sweep.side === 'LONG' ? 'LIQUIDITY_SWEEP_LONG_CONFIRMED' : 'LIQUIDITY_SWEEP_SHORT_CONFIRMED'] : []), ...reasons])).slice(0, 16),
+    reasons: dedupedReasons,
+    events: {
+      volumeSpike: volumeRatio >= 1.2,
+      trendBreak: dedupedReasons.some((r) => r.includes('BREAK_OF_STRUCTURE') || r.includes('CHOCH')),
+      highScore: finalScore >= 75,
+      liquidityContradiction: liquidityContradiction || contradictionDetected,
+    },
     earlySignal: {
       side: earlySide,
       confidence: Math.max(earlyLongScore, earlyShortScore),

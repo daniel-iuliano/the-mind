@@ -91,6 +91,13 @@ export interface EarlySignal {
   reasons: string[];
 }
 
+export interface AnalysisEvents {
+  volumeSpike: boolean;
+  trendBreak: boolean;
+  highScore: boolean;
+  liquidityContradiction: boolean;
+}
+
 export interface MarketAnalysis {
   symbol: string;
   price: number;
@@ -102,6 +109,7 @@ export interface MarketAnalysis {
   score: number; // Alias used by existing UI/alerts (maps to conditionStrength)
   bias: SignalBias;
   reasons: string[];
+  events: AnalysisEvents;
   earlySignal: EarlySignal;
   perfectTrade?: {
     active: boolean;

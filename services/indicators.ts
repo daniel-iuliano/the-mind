@@ -90,9 +90,11 @@ export const calculateStochRSI = (rsiValues: number[], period = 14, kPeriod = 3,
     stochRsi.push(k * 100);
   }
 
-  // Calculate K and D lines (SMA of StochRSI)
-  const kLine = calculateSMA(stochRsi.map(v => isNaN(v) ? 0 : v), kPeriod);
-  const dLine = calculateSMA(kLine.map(v => isNaN(v) ? 0 : v), dPeriod);
+  // Calculate K and D lines (SMA of StochRSI) preserving warmup NaN values
+  const kRaw = calculateSMA(stochRsi, kPeriod);
+  const dRaw = calculateSMA(kRaw, dPeriod);
+  const kLine = kRaw.map((v, i) => (Number.isFinite(stochRsi[i]) ? v : NaN));
+  const dLine = dRaw.map((v, i) => (Number.isFinite(kLine[i]) ? v : NaN));
 
   return { kLine, dLine };
 };
@@ -126,22 +128,33 @@ export const calculateBollingerBands = (closePrices: number[], period = 20, mult
 };
 
 export const calculateATR = (candles: OHLCV[], period = 14): number[] => {
-  const tr = [0];
+  if (candles.length === 0) return [];
+
+  const tr: number[] = [NaN];
   for (let i = 1; i < candles.length; i++) {
     const high = candles[i].high;
     const low = candles[i].low;
     const prevClose = candles[i - 1].close;
-    
+
     const trVal = Math.max(
       high - low,
       Math.abs(high - prevClose),
-      Math.abs(low - prevClose)
+      Math.abs(low - prevClose),
     );
     tr.push(trVal);
   }
-  // RMA (Running Moving Average) is standard for ATR, but SMA is often close enough for simple usage. 
-  // We'll use SMA for stability in this demo.
-  return calculateSMA(tr, period);
+
+  const atr = new Array(candles.length).fill(NaN);
+  if (candles.length <= period) return atr;
+
+  const seed = tr.slice(1, period + 1).reduce((acc, x) => acc + x, 0) / period;
+  atr[period] = seed;
+
+  for (let i = period + 1; i < tr.length; i++) {
+    atr[i] = ((atr[i - 1] * (period - 1)) + tr[i]) / period;
+  }
+
+  return atr;
 };
 
 // --- Support and Resistance Calculation ---
@@ -229,21 +242,21 @@ export const analyzeCandles = (candles: OHLCV[]): IndicatorValues => {
   const signalVal = signalLine[idx] || 0;
 
   return {
-    rsi: rsiArr[idx] || 50,
+    rsi: Number.isFinite(rsiArr[idx]) ? rsiArr[idx] : 50,
     stochRsi: {
-        k: stoch.kLine[idx] || 50,
-        d: stoch.dLine[idx] || 50
+        k: Number.isFinite(stoch.kLine[idx]) ? stoch.kLine[idx] : 50,
+        d: Number.isFinite(stoch.dLine[idx]) ? stoch.dLine[idx] : 50
     },
     macd: {
       macd: macdVal,
       signal: signalVal,
       histogram: macdVal - signalVal
     },
-    ema20: ema20Arr[idx] || closes[idx],
-    ema50: ema50Arr[idx] || closes[idx],
-    ema200: ema200Arr[idx] || closes[idx],
-    bb: bbArr[idx] || { upper: 0, lower: 0, middle: 0 },
-    atr: atrArr[idx] || 0
+    ema20: Number.isFinite(ema20Arr[idx]) ? ema20Arr[idx] : closes[idx],
+    ema50: Number.isFinite(ema50Arr[idx]) ? ema50Arr[idx] : closes[idx],
+    ema200: Number.isFinite(ema200Arr[idx]) ? ema200Arr[idx] : closes[idx],
+    bb: bbArr[idx] && Number.isFinite(bbArr[idx].middle) ? bbArr[idx] : { upper: 0, lower: 0, middle: 0 },
+    atr: Number.isFinite(atrArr[idx]) ? atrArr[idx] : 0
   };
 };
 
