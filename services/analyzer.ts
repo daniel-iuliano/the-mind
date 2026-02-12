@@ -616,7 +616,7 @@ const computeInstitutionalModule = (ctx: {
     const riskAdj = regime === 'STRONG_TREND' ? 1 : regime === 'LOW_VOLATILITY' ? 0.45 : 0.72;
     const sizePct = clamp((institutionalScore / 100) * riskAdj * (rr >= 3 ? 1 : 0.7), 0.1, 1);
     smartEntry = {
-      side: ctx.side,
+      side: ctx.side as 'LONG' | 'SHORT',
       entry: ctx.price,
       stopLoss,
       takeProfit,

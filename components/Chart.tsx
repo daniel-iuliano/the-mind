@@ -14,6 +14,8 @@ import {
 } from 'recharts';
 import { OHLCV, SupportResistanceLevel, OrderBlockLevel, OrderBlockVisibility } from '../types';
 
+const UnsafeReferenceArea = ReferenceArea as unknown as React.ComponentType<any>;
+
 interface ChartProps {
   data: (OHLCV & { ema20?: number; ema50?: number })[];
   symbol: string;
@@ -156,11 +158,9 @@ const Chart: React.FC<ChartProps> = ({
             .filter((level) => !!level.zone && (level.type === 'demand' || level.type === 'supply' || level.type === 'imbalance'))
             .filter((level) => isVisibleType(level.type))
             .map((level, i) => (
-              <ReferenceArea
-                key={`ob-zone-${level.type}-${i}`}
+                            <UnsafeReferenceArea
                 y1={level.zone!.low}
                 y2={level.zone!.high}
-                stroke="none"
                 fill={
                   level.type === 'demand'
                     ? colors.demandFill
