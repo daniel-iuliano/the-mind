@@ -1,5 +1,6 @@
 import { MarketAnalysis, SupportResistanceLevel, PredictionResult, OHLCV } from "../types";
 import { formatPrice } from "../utils/formatters";
+import { classifyDirection, runProbabilisticEnsemble, scoreRegimePenalty, toPercentage } from "./probabilisticEngine";
 
 type MarketRegime = 'VOLATILE' | 'CALM' | 'TRENDING' | 'RANGING';
 type Direction = 'BULL' | 'BEAR' | 'NEUTRAL';
@@ -521,9 +522,17 @@ export const generatePrediction = (
     return f.direction === 'BEAR' && f.score >= 56;
   }).length;
 
-  let finalDirection: Direction = 'NEUTRAL';
-  if (directionalEdge >= DIRECTIONAL_EDGE_THRESHOLD) finalDirection = 'BULL';
-  if (directionalEdge <= -DIRECTIONAL_EDGE_THRESHOLD) finalDirection = 'BEAR';
+  const initialEnsemble = runProbabilisticEnsemble({
+    factors: factors.map((factor) => ({
+      name: factor.factor,
+      score: factor.score,
+      weight: factor.weight,
+      direction: factor.direction,
+    })),
+    regimePenalty: scoreRegimePenalty(regime),
+  });
+
+  let finalDirection: Direction = classifyDirection(initialEnsemble, DIRECTIONAL_EDGE_THRESHOLD / 100);
 
   const extremeLiquidityImbalance = orderBlockInsights.dominanceStrength >= EXTREME_IMBALANCE_THRESHOLD;
   const contradictionDetected =
@@ -535,6 +544,17 @@ export const generatePrediction = (
   if (contradictionDetected) {
     finalDirection = 'NEUTRAL';
   }
+
+  const probabilisticOutput = runProbabilisticEnsemble({
+    factors: factors.map((factor) => ({
+      name: factor.factor,
+      score: factor.score,
+      weight: factor.weight,
+      direction: factor.direction,
+    })),
+    regimePenalty: scoreRegimePenalty(regime),
+    contradictionPenalty: contradictionDetected ? 0.35 : 0,
+  });
 
   const candidateLevels = calculateLevelCandidates(analysis, levels);
   let predictionBias = directionToBias(finalDirection);
@@ -562,7 +582,8 @@ export const generatePrediction = (
     predictionBias = 'NEUTRAL';
   }
 
-  let probability = Math.round(clamp(38 + confluenceScore * 0.48 + Math.abs(directionalEdge) * 0.42 + orderBlockSignal.score * 0.12, 35, 95));
+  let probability = toPercentage(Math.max(probabilisticOutput.bullProbability, probabilisticOutput.bearProbability));
+  probability = Math.round(clamp(probability * 0.7 + confluenceScore * 0.22 + orderBlockSignal.score * 0.08, 35, 96));
   if (!validationPassed) probability = Math.max(35, probability - 16);
   if (contradictionDetected) probability = Math.max(30, probability - 20);
 
@@ -623,6 +644,14 @@ export const generatePrediction = (
       confluenceScore,
       confirmations,
       threshold: CONFLUENCE_THRESHOLD,
+    },
+    modelDiagnostics: {
+      bullProbability: toPercentage(probabilisticOutput.bullProbability),
+      bearProbability: toPercentage(probabilisticOutput.bearProbability),
+      neutralProbability: toPercentage(probabilisticOutput.neutralProbability),
+      uncertainty: toPercentage(probabilisticOutput.uncertainty),
+      ensembleConfidence: Math.round(probabilisticOutput.confidence),
+      directionalEdge: Number(probabilisticOutput.directionalEdge.toFixed(3)),
     },
     auditTrail: factors,
     timestamp: Date.now(),
