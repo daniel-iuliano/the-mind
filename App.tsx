@@ -123,14 +123,16 @@ const StreetBadge = ({ text, type }: { text: string, type: 'bull' | 'bear' | 'ne
   return <span className={`${colors[type]} px-2 py-0.5 text-[10px] font-bold uppercase border-2 shadow-brutal-sm transform -rotate-1`}>{text}</span>;
 };
 
-const MarketCard = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }: { 
-    data: MarketAnalysis, 
-    onClick: () => void, 
-    isLoading: boolean, 
-    isFavorite: boolean,
-    onToggleFav: (e: React.MouseEvent) => void,
-    lang: Language
-}) => {
+interface MarketCardProps {
+  data: MarketAnalysis;
+  onClick: () => void;
+  isLoading: boolean;
+  isFavorite: boolean;
+  onToggleFav: (e: React.MouseEvent) => void;
+  lang: Language;
+}
+
+const MarketCard: React.FC<MarketCardProps> = ({ data, onClick, isLoading, isFavorite, onToggleFav, lang }) => {
   const t = TRANSLATIONS[lang];
   const isBull = data.bias.includes('BUY');
   const isBear = data.bias.includes('SELL');
@@ -1006,7 +1008,7 @@ export default function App() {
   }, [displayMarketData]);
 
   const displayData = useMemo(() => {
-      const orderIndex = new Map(marketOrder.map((symbol, index) => [symbol, index]));
+      const orderIndex = new Map<string, number>(marketOrder.map((symbol, index) => [symbol, index]));
       return displayMarketData.filter(item => {
           const isFav = favorites.includes(item.symbol);
           if (isFav) return true;
