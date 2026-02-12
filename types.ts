@@ -200,6 +200,14 @@ export interface PredictionResult {
     confirmations: number;
     threshold: number;
   };
+  modelDiagnostics?: {
+    bullProbability: number;
+    bearProbability: number;
+    neutralProbability: number;
+    uncertainty: number;
+    ensembleConfidence: number;
+    directionalEdge: number;
+  };
   auditTrail: Array<{
     factor: string;
     score: number;
